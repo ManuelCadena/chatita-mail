@@ -17,6 +17,20 @@ router = APIRouter(prefix="/api/classify", tags=["classify"])
 _triage = TriageService()
 
 
+# NOTE: Static routes (/preview) MUST be declared before the dynamic
+# /{email_id} route, otherwise FastAPI captures "preview" as email_id.
+@router.post("/preview", response_model=ClassificationResult)
+async def classify_preview(
+    from_address: str,
+    subject: str | None = None,
+    body_text: str | None = None,
+) -> ClassificationResult:
+    """Classify ad-hoc content without persisting (useful for testing/tuning)."""
+    return await _triage.classifier.classify(
+        from_address=from_address, subject=subject, body_text=body_text
+    )
+
+
 @router.post("/{email_id}")
 async def triage_email(
     email_id: str,
@@ -39,18 +53,6 @@ async def triage_email(
         "status": outcome.status,
         "actions": outcome.actions,
     }
-
-
-@router.post("/preview", response_model=ClassificationResult)
-async def classify_preview(
-    from_address: str,
-    subject: str | None = None,
-    body_text: str | None = None,
-) -> ClassificationResult:
-    """Classify ad-hoc content without persisting (useful for testing/tuning)."""
-    return await _triage.classifier.classify(
-        from_address=from_address, subject=subject, body_text=body_text
-    )
 
 
 @router.patch("/{email_id}/reclassify")

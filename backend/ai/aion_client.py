@@ -54,11 +54,10 @@ class AIONBrainClient:
           simple | medium | complex | critical | search | embedding | classification
         Returns a dict with at least {"text": str} plus provider metadata.
         """
-        payload = {"prompt": prompt, "task_type": task_type, **kwargs}
         try:
             if self.mode == "http":
-                return await self._orchestrate_http(payload)
-            return await self._orchestrate_stdio(payload)
+                return await self._orchestrate_http(prompt, task_type, **kwargs)
+            return await self._orchestrate_stdio(prompt, task_type, **kwargs)
         except Exception as exc:  # noqa: BLE001
             logger.warning("AION Brain orchestrate failed: %s", exc)
             if self.allow_fallback:
@@ -71,8 +70,8 @@ class AIONBrainClient:
             if self.mode == "http":
                 async with httpx.AsyncClient(timeout=self.timeout) as client:
                     resp = await client.post(
-                        f"{self.base_url}/tool",
-                        json={"tool": tool, "params": params},
+                        f"{self.base_url}/execute_tool",
+                        json={"toolName": tool, "parameters": params},
                     )
                     resp.raise_for_status()
                     return resp.json()
@@ -101,16 +100,53 @@ class AIONBrainClient:
             return {"reachable": False, "mode": self.mode, "error": str(exc)}
 
     # ── HTTP transport ──────────────────────────────────────
-    async def _orchestrate_http(self, payload: dict[str, Any]) -> dict[str, Any]:
+    async def _orchestrate_http(
+        self, prompt: str, task_type: str, **kwargs: Any
+    ) -> dict[str, Any]:
+        # AION Brain HTTP contract: {query, taskType, userId, priority}
+        payload = {
+            "query": prompt,
+            "taskType": task_type,
+            "userId": kwargs.get("user_id", "chatita-mail"),
+            "priority": kwargs.get("priority", "P2"),
+        }
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             resp = await client.post(f"{self.base_url}/orchestrate", json=payload)
             resp.raise_for_status()
-            return resp.json()
+            return self._normalize(resp.json())
 
     # ── stdio (MCP) transport ───────────────────────────────
-    async def _orchestrate_stdio(self, payload: dict[str, Any]) -> dict[str, Any]:
-        result = await self._call_mcp_tool("aion_orchestrate", payload)
-        return result
+    async def _orchestrate_stdio(
+        self, prompt: str, task_type: str, **kwargs: Any
+    ) -> dict[str, Any]:
+        args = {"query": prompt, "taskType": task_type, **kwargs}
+        result = await self._call_mcp_tool("aion_orchestrate", args)
+        return self._normalize(result)
+
+    @staticmethod
+    def _normalize(data: dict[str, Any]) -> dict[str, Any]:
+        """
+        Map AION Brain's orchestrate response to Chatita Mail's expected shape.
+
+        AION returns the model answer at data["execution"]["output"]; we surface
+        it as {"text": ...} plus routing/cost metadata for observability.
+        """
+        if not isinstance(data, dict):
+            return {"text": str(data)}
+        execution = data.get("execution") or {}
+        text = execution.get("output")
+        if text is None:
+            # Some tools/paths return plain text already
+            text = data.get("text", "")
+        return {
+            "text": text,
+            "model": data.get("selectedModel"),
+            "provider": execution.get("provider"),
+            "routed_api": data.get("routedApi"),
+            "estimated_cost": data.get("estimatedCost"),
+            "latency_ms": data.get("totalLatency"),
+            "raw": data,
+        }
 
     async def _execute_tool_stdio(self, tool: str, params: dict[str, Any]) -> dict[str, Any]:
         return await self._call_mcp_tool(tool, params)

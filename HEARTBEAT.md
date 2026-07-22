@@ -14,8 +14,8 @@
 | **Motor AI** | AION Brain v3.2 vía **MCP** (ya publicado) |
 | **Repo** | https://github.com/ManuelCadena/chatita-mail |
 | **Autor** | Manuel Cadena |
-| **Última actualización** | 22-Jul-2026 03:10 (UTC-06:00) |
-| **Fase actual** | 🟢 **FASE 1 EN CURSO** — backend core VERIFICADO, falta UI |
+| **Última actualización** | 22-Jul-2026 08:25 (UTC-06:00) |
+| **Fase actual** | 🟢 **FASE 1 ~90%** — pipeline LLM real E2E VERIFICADO (AION Brain conectado). Falta: conectores email (B-4), side menu (B-5) |
 | **Meta usuario** | ≤5 min/día en email · 100% importantes atendidos · 0% spam |
 
 ---
@@ -460,6 +460,9 @@ Email entrante
 | 22-Jul-2026 03:10 | FASE 0 completa: config, DB (8 tablas+pgvector), AIONClient, FastAPI | HECHO VERIFICADO | `setup_db` OK, `/health` DB✅ Redis✅ |
 | 22-Jul-2026 03:10 | FASE 1 backend: clasificador 2 etapas, phishing+XAI, prompt-injection, triage, unsubscribe, notifier, 9 rutas API | HECHO VERIFICADO | E2E ingest+triage+analyze OK; 9/9 tests PASSED |
 | 22-Jul-2026 03:10 | FASE 1 frontend: React+TS+Vite+Tailwind, inbox categorizado, filtros, panel XAI (clasificación+seguridad) | BUILD-VERIFICADO | `npm run build` OK (131 módulos, dist generado, exit 0) |
+| 22-Jul-2026 08:25 | B-3 AION Brain conectado: arrancado http-server.js :3100, corregido contrato (query/taskType + execution.output) en aion_client.py | HECHO VERIFICADO | `/health` aion reachable:true; orchestrate 200 OK |
+| 22-Jul-2026 08:25 | FIX ruta: /preview capturado como {email_id} → reordenado en classify.py | HECHO VERIFICADO | causa raíz en log (DataError UUID 'preview'), post-fix clasifica OK |
+| 22-Jul-2026 08:25 | E2E con LLM real: clasificación IMPORTANT/CRITICAL stage=llm + reasoning; phishing crítico score 95 dangerous/block con XAI de Claude | HECHO VERIFICADO | 9/9 tests PASSED; triage E2E "contrato hoy"→CRITICAL 0.95 |
 
 ---
 
@@ -469,9 +472,10 @@ Email entrante
 |---|---------|----------|--------|
 | B-1 | Aprobación arquitectura v3.0 | OK de Manny | ✅ APROBADO (procede) |
 | B-2 | ¿Empezar FASE 0 ya? | Confirmación | ✅ HECHO |
-| B-3 | Verificar endpoint HTTP de AION Brain en :3100 | Conectar AION Brain local o apuntar a chatita.ai | 🔴 ABIERTO — hoy `reachable:false`, pipeline usa fallback |
+| B-3 | Conectar AION Brain :3100 (orchestrate) | — | ✅ RESUELTO (orchestrate LLM+phishing verificado). ⚠️ Parcial: `execute_tool` (opencorporates/telegram) degrada — AION rutea tools vía gateway :8088 no activo + esos tools no están en su registro de 67 |
 | B-4 | Conectores reales Gmail/iCloud (ingesta) | OAuth + credenciales | 🔴 ABIERTO — hoy ingesta vía POST /api/inbox/ingest |
 | B-5 | Integrar link `/mail` en side menu de Chatita (local) | Editar UI de Chatita | 🔴 ABIERTO |
+| B-6 | AION Brain no arranca como servicio persistente (hoy proceso manual :3100) | systemd/pm2 o launchd | 🟡 ABIERTO — arranque manual verificado |
 
 ---
 
