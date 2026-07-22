@@ -463,6 +463,7 @@ Email entrante
 | 22-Jul-2026 08:25 | B-3 AION Brain conectado: arrancado http-server.js :3100, corregido contrato (query/taskType + execution.output) en aion_client.py | HECHO VERIFICADO | `/health` aion reachable:true; orchestrate 200 OK |
 | 22-Jul-2026 08:25 | FIX ruta: /preview capturado como {email_id} → reordenado en classify.py | HECHO VERIFICADO | causa raíz en log (DataError UUID 'preview'), post-fix clasifica OK |
 | 22-Jul-2026 08:25 | E2E con LLM real: clasificación IMPORTANT/CRITICAL stage=llm + reasoning; phishing crítico score 95 dangerous/block con XAI de Claude | HECHO VERIFICADO | 9/9 tests PASSED; triage E2E "contrato hoy"→CRITICAL 0.95 |
+| 22-Jul-2026 08:34 | UI runtime verificada (Playwright): inbox categorizado, badges categoría+seguridad, filtros, panel XAI muestra reasoning LLM real y factores de phishing; auto-acciones (SPAM→archive, dangerous→block) reflejadas en INBOX | HECHO VERIFICADO | snapshot Playwright, 0 errores consola, CRITICAL XAI "95% · llm" con reasoning |
 
 ---
 
