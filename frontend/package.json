@@ -1,8 +1,9 @@
 {
   "name": "chatita-mail-frontend",
-  "version": "2.0.0-alpha",
+  "version": "3.0.0-alpha",
   "description": "Chatita Mail Frontend - React + TypeScript",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
