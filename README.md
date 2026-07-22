@@ -1,9 +1,11 @@
-# Chatita Mail v2.0
+# Chatita Mail v3.0
 **AI-Powered Email Management System with AION Brain Integration**
 
 [![Status](https://img.shields.io/badge/status-development-yellow)](https://github.com/ManuelCadena/chatita-mail)
-[![Version](https://img.shields.io/badge/version-2.0.0--alpha-blue)](https://github.com/ManuelCadena/chatita-mail)
+[![Version](https://img.shields.io/badge/version-3.0.0--alpha-blue)](https://github.com/ManuelCadena/chatita-mail)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
+> 🫀 **Documento maestro de desarrollo**: [`HEARTBEAT.md`](HEARTBEAT.md) — leer PRIMERO al iniciar cualquier sesión de desarrollo. Contiene decisiones arquitectónicas fijas, infra de despliegue (local + servidor Chatita `54.212.177.221`), guía de integración AION Brain vía MCP, y el roadmap de 5 fases con tareas desglosadas.
 
 ---
 
