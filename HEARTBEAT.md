@@ -464,6 +464,7 @@ Email entrante
 | 22-Jul-2026 08:25 | FIX ruta: /preview capturado como {email_id} → reordenado en classify.py | HECHO VERIFICADO | causa raíz en log (DataError UUID 'preview'), post-fix clasifica OK |
 | 22-Jul-2026 08:25 | E2E con LLM real: clasificación IMPORTANT/CRITICAL stage=llm + reasoning; phishing crítico score 95 dangerous/block con XAI de Claude | HECHO VERIFICADO | 9/9 tests PASSED; triage E2E "contrato hoy"→CRITICAL 0.95 |
 | 22-Jul-2026 08:34 | UI runtime verificada (Playwright): inbox categorizado, badges categoría+seguridad, filtros, panel XAI muestra reasoning LLM real y factores de phishing; auto-acciones (SPAM→archive, dangerous→block) reflejadas en INBOX | HECHO VERIFICADO | snapshot Playwright, 0 errores consola, CRITICAL XAI "95% · llm" con reasoning |
+| 22-Jul-2026 08:42 | B-4 conector Gmail: service account + Domain-Wide Delegation (reutiliza chatita-service-account.json), impersona jose@manuelcadena.com; gmail_connector.py + sync.py + rutas /gmail/health y /sync/gmail | HECHO VERIFICADO | gmail/health ok:true email=jose@ 31,272 msgs; sync 4 emails REALES→NOISE/SPAM auto-archivados, auto-unsubscribe OK; 9/9 tests |
 
 ---
 
@@ -474,8 +475,8 @@ Email entrante
 | B-1 | Aprobación arquitectura v3.0 | OK de Manny | ✅ APROBADO (procede) |
 | B-2 | ¿Empezar FASE 0 ya? | Confirmación | ✅ HECHO |
 | B-3 | Conectar AION Brain :3100 (orchestrate) | — | ✅ RESUELTO (orchestrate LLM+phishing verificado). ⚠️ Parcial: `execute_tool` (opencorporates/telegram) degrada — AION rutea tools vía gateway :8088 no activo + esos tools no están en su registro de 67 |
-| B-4 | Conectores reales Gmail/iCloud (ingesta) | OAuth + credenciales | 🔴 ABIERTO — hoy ingesta vía POST /api/inbox/ingest |
-| B-5 | Integrar link `/mail` en side menu de Chatita (local) | Editar UI de Chatita | 🔴 ABIERTO |
+| B-4 | Conector Gmail (ingesta real) | — | ✅ RESUELTO (Gmail via SA+DWD, sync+triage verificado con 31k msgs reales). ⚠️ Pendiente: conector iCloud (T1.1.2) y sync incremental/webhook (T1.1.4) |
+| B-5 | Integrar link `/mail` en side menu de Chatita (local) | OK de Manny para editar UI de Chatita (zona sensible) | 🔴 ABIERTO — SIGUIENTE |
 | B-6 | AION Brain no arranca como servicio persistente (hoy proceso manual :3100) | systemd/pm2 o launchd | 🟡 ABIERTO — arranque manual verificado |
 
 ---

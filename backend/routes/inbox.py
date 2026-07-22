@@ -19,8 +19,12 @@ from backend.models.entities import (
     EmailStatus,
 )
 from backend.models.schemas import EmailIn, EmailOut
+from backend.services.email.gmail_connector import GmailConnector
+from backend.services.email.sync import GmailSyncService
 
 router = APIRouter(prefix="/api/inbox", tags=["inbox"])
+
+_gmail_sync = GmailSyncService()
 
 
 async def _get_or_create_account(session: AsyncSession, email_address: str) -> EmailAccount:
@@ -152,3 +156,25 @@ async def get_email(
         if email.security_event
         else None,
     }
+
+
+@router.get("/gmail/health", tags=["gmail"])
+async def gmail_health() -> dict:
+    """Verify Gmail service-account delegation works for the configured mailbox."""
+    return GmailConnector().health()
+
+
+@router.post("/sync/gmail", tags=["gmail"])
+async def sync_gmail(
+    max_results: int = Query(10, le=50, description="How many recent INBOX emails to pull"),
+    unread_only: bool = Query(False),
+    triage: bool = Query(True, description="Run classification + security + auto-actions"),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """
+    Pull recent Gmail emails, persist them, and (optionally) run the full
+    triage pipeline. Idempotent by provider_message_id.
+    """
+    return await _gmail_sync.sync(
+        session, max_results=max_results, unread_only=unread_only, run_triage=triage
+    )
