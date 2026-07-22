@@ -15,7 +15,7 @@
 | **Repo** | https://github.com/ManuelCadena/chatita-mail |
 | **Autor** | Manuel Cadena |
 | **Última actualización** | 22-Jul-2026 08:25 (UTC-06:00) |
-| **Fase actual** | 🟢 **FASE 1 ~90%** — pipeline LLM real E2E VERIFICADO (AION Brain conectado). Falta: conectores email (B-4), side menu (B-5) |
+| **Fase actual** | 🟢 **FASE 1 CORE COMPLETA** — B-3..B-6 RESUELTOS (AION Brain, Gmail, side menu, servicio persistente). Pendiente menor: iCloud (T1.1.2), sync incremental (T1.1.4), deploy prod |
 | **Meta usuario** | ≤5 min/día en email · 100% importantes atendidos · 0% spam |
 
 ---
