@@ -14,8 +14,8 @@
 | **Motor AI** | AION Brain v3.2 vía **MCP** (ya publicado) |
 | **Repo** | https://github.com/ManuelCadena/chatita-mail |
 | **Autor** | Manuel Cadena |
-| **Última actualización** | 22-Jul-2026 03:00 (UTC-06:00) |
-| **Fase actual** | ⏸️ **PRE-DESARROLLO** (esperando aprobación de arquitectura) |
+| **Última actualización** | 22-Jul-2026 03:10 (UTC-06:00) |
+| **Fase actual** | 🟢 **FASE 1 EN CURSO** — backend core VERIFICADO, falta UI |
 | **Meta usuario** | ≤5 min/día en email · 100% importantes atendidos · 0% spam |
 
 ---
@@ -457,6 +457,8 @@ Email entrante
 | 22-Jul-2026 02:51 | Análisis research v3.0 (50 papers) | HECHO VERIFICADO | commit c9f7125 |
 | 22-Jul-2026 02:58 | Arquitectura v3.0 + Executive Summary | HECHO VERIFICADO | commit 106491b |
 | 22-Jul-2026 03:00 | HEARTBEAT maestro creado (este doc) | HECHO VERIFICADO | este archivo |
+| 22-Jul-2026 03:10 | FASE 0 completa: config, DB (8 tablas+pgvector), AIONClient, FastAPI | HECHO VERIFICADO | `setup_db` OK, `/health` DB✅ Redis✅ |
+| 22-Jul-2026 03:10 | FASE 1 backend: clasificador 2 etapas, phishing+XAI, prompt-injection, triage, unsubscribe, notifier, 9 rutas API | HECHO VERIFICADO | E2E ingest+triage+analyze OK; 9/9 tests PASSED |
 
 ---
 

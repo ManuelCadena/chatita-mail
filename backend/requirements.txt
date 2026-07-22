@@ -1,4 +1,4 @@
-# Chatita Mail v2.0 — Python Dependencies
+# Chatita Mail v3.0 — Python Dependencies
 
 # ── Web Framework ───────────────────────────────────────────
 fastapi==0.115.0
@@ -9,6 +9,7 @@ pydantic-settings==2.6.0
 # ── Database ────────────────────────────────────────────────
 sqlalchemy==2.0.36
 asyncpg==0.30.0
+greenlet==3.1.1          # required by SQLAlchemy async engine
 alembic==1.14.0
 psycopg2-binary==2.9.10
 redis==5.2.0
