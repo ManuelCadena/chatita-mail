@@ -15,7 +15,7 @@
 | **Repo** | https://github.com/ManuelCadena/chatita-mail |
 | **Autor** | Manuel Cadena |
 | **Última actualización** | 22-Jul-2026 08:25 (UTC-06:00) |
-| **Fase actual** | 🟢 **FASE 1 CORE COMPLETA** — B-3..B-6 RESUELTOS (AION Brain, Gmail, side menu, servicio persistente). Pendiente menor: iCloud (T1.1.2), sync incremental (T1.1.4), deploy prod |
+| **Fase actual** | 🟢 **FASE 2 EN CURSO** — UI robusta v3 (3 paneles, HTML, XAI, acciones) + TaskExtractor verificados E2E. ⚠️ R-1: AION orchestrate en fallback (regresión externa). Pendiente: iCloud, sync incremental, deploy prod |
 | **Meta usuario** | ≤5 min/día en email · 100% importantes atendidos · 0% spam |
 
 ---
@@ -467,6 +467,10 @@ Email entrante
 | 22-Jul-2026 08:42 | B-4 conector Gmail: service account + Domain-Wide Delegation (reutiliza chatita-service-account.json), impersona jose@manuelcadena.com; gmail_connector.py + sync.py + rutas /gmail/health y /sync/gmail | HECHO VERIFICADO | gmail/health ok:true email=jose@ 31,272 msgs; sync 4 emails REALES→NOISE/SPAM auto-archivados, auto-unsubscribe OK; 9/9 tests |
 | 22-Jul-2026 08:55 | B-5 link en side menu de Chatita (local): nav-btn + panel iframe en chat.html, loader+título en dashboard.js, fix CSP frame-src +localhost:5173 en server.js. Backups .bak creados | HECHO VERIFICADO | Playwright: click nav→panel activo, iframe carga app mail v3.0 con inbox real (CRITICAL+phishing), CSP framing error resuelto |
 | 22-Jul-2026 09:00 | B-6 AION Brain servicio persistente: launchd plist ai.chatita.aion-brain (RunAtLoad+KeepAlive) en tools/aion-brain/ + ~/Library/LaunchAgents. NO cambia código de AION Brain (solo infra) | HECHO VERIFICADO | launchctl list muestra PID; kill -9 → auto-reinicio (91312→91561) HTTP 200; mail :8000 ve aion reachable:true |
+| 23-Jul-2026 02:40 | FASE 2 (workflow): TaskExtractor (services/workflow) vía AION Brain → tasks+commitments JSON con fallback regex; rutas /api/tasks, /commitments, .../extract; wired en triage para CRITICAL/IMPORTANT | HECHO VERIFICADO | import OK, 9/9 tests; /api/tasks 200; extracción corre (source=fallback por regresión AION, ver R-1) |
+| 23-Jul-2026 02:40 | Backend data layer: /api/inbox/stats (counts+time-saved), list con search/unread, EmailOut enriquecido, get_email con body_html+recipients+attachments+tasks+auto-read, acciones status/read/unsubscribe | HECHO VERIFICADO | /stats devuelve by_status/by_category reales; get_email retorna html+is_read=true tras abrir |
+| 23-Jul-2026 02:40 | Fix conector Gmail: body_html se extraía pero se descartaba → ahora persiste (gmail_connector+sync); aion_client._normalize robusto a múltiples shapes + detección de error | HECHO VERIFICADO | re-sync: 20/59 emails con HTML real; UI renderiza HTML |
+| 23-Jul-2026 02:40 | UI OVERHAUL v3 (React): layout 3 paneles — Sidebar (folders+counts+sync+time-saved), EmailList (avatars/badges/unread/search), ReadingPane (HTML sanitizado DOMPurify+toolbar+XAI+tasks), TasksView, header con search+unread | BUILD-VERIFICADO + E2E | npm build exit 0 (1994 mods); Playwright :5173/mail: sidebar counts, lista 25 emails reales, reading pane con body HTML + panel XAI + mark-read; 0 errores consola |
 
 ---
 
@@ -480,6 +484,7 @@ Email entrante
 | B-4 | Conector Gmail (ingesta real) | — | ✅ RESUELTO (Gmail via SA+DWD, sync+triage verificado con 31k msgs reales). ⚠️ Pendiente: conector iCloud (T1.1.2) y sync incremental/webhook (T1.1.4) |
 | B-5 | Integrar link `/mail` en side menu de Chatita (local) | — | ✅ RESUELTO (nav-btn + iframe panel + CSP fix, verificado Playwright). ⚠️ Prod: nginx debe servir /mail/ same-origin (frame-src 'self' ya lo cubre) |
 | B-6 | AION Brain como servicio persistente | — | ✅ RESUELTO (launchd ai.chatita.aion-brain, RunAtLoad+KeepAlive verificado). ⚠️ Prod servidor Chatita usa systemd (pendiente si aplica) |
+| R-1 | 🔴 RIESGO: AION Brain `/orchestrate` lanza `prompt.split is not a function` para TODA query (regresión en `tools/aion-brain/http-server.js`+`prompt-compiler.js`, editados por otro proceso hoy 23-Jul 01:50). Impacto: clasificación/phishing/extracción degradan a fallback (todo→MEDIUM, 0 tasks). Chatita Mail NO está roto (fallback + datos previos). NO parcheado: es servicio MCP compartido, no cambiar su esencia | Decisión de Manny: ¿arreglar `prompt-compiler._detectComplexity(prompt)` en aion-brain (repo separado) o revertir el commit de hoy? | 🟡 ABIERTO — reportado, requiere decisión |
 
 ---
 
