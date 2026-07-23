@@ -11,3 +11,29 @@ body {
   background: #f8fafc;
   color: #0f172a;
 }
+
+/* Contain rendered HTML emails so wide tables/images don't break layout */
+.email-html {
+  overflow-x: auto;
+  word-break: break-word;
+}
+.email-html img {
+  max-width: 100%;
+  height: auto;
+}
+.email-html a {
+  color: #2563eb;
+  text-decoration: underline;
+}
+.email-html table {
+  max-width: 100%;
+}
+.email-html blockquote {
+  border-left: 3px solid #e2e8f0;
+  margin: 0.5rem 0;
+  padding-left: 0.75rem;
+  color: #64748b;
+}
+.email-html p {
+  margin: 0.5rem 0;
+}

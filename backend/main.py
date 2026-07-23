@@ -94,7 +94,9 @@ async def version() -> dict:
 from backend.routes import classify as classify_routes  # noqa: E402
 from backend.routes import inbox as inbox_routes  # noqa: E402
 from backend.routes import security as security_routes  # noqa: E402
+from backend.routes import tasks as tasks_routes  # noqa: E402
 
 app.include_router(inbox_routes.router)
 app.include_router(classify_routes.router)
 app.include_router(security_routes.router)
+app.include_router(tasks_routes.router)

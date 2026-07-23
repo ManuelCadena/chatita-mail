@@ -1,46 +1,51 @@
+// Chatita Mail v3.0 — category & security badges
 import type { EmailCategory, RiskLevel } from "../types";
+import { CATEGORY_META, RISK_META } from "../lib/format";
 
-const CATEGORY_STYLE: Record<EmailCategory, string> = {
-  CRITICAL: "bg-red-100 text-red-700 border-red-300",
-  IMPORTANT: "bg-orange-100 text-orange-700 border-orange-300",
-  MEDIUM: "bg-yellow-100 text-yellow-700 border-yellow-300",
-  LOW: "bg-slate-100 text-slate-600 border-slate-300",
-  SPAM: "bg-slate-200 text-slate-500 border-slate-300",
-  NOISE: "bg-slate-100 text-slate-400 border-slate-200",
-  UNCLASSIFIED: "bg-slate-50 text-slate-400 border-slate-200",
-};
-
-export function CategoryBadge({ category }: { category: EmailCategory | null }) {
+export function CategoryBadge({
+  category,
+  size = "sm",
+}: {
+  category: EmailCategory | null;
+  size?: "sm" | "xs";
+}) {
   if (!category) return null;
+  const m = CATEGORY_META[category];
+  const pad = size === "xs" ? "px-1.5 py-0.5 text-[10px]" : "px-2 py-0.5 text-xs";
   return (
     <span
-      className={`text-xs font-semibold px-2 py-0.5 rounded border ${CATEGORY_STYLE[category]}`}
+      className={`inline-flex items-center gap-1 rounded-full border font-medium ${pad} ${m.chip}`}
     >
-      {category}
+      <span>{m.emoji}</span>
+      {m.label}
     </span>
   );
 }
 
-const RISK_STYLE: Record<RiskLevel, string> = {
-  safe: "bg-green-100 text-green-700 border-green-300",
-  suspicious: "bg-amber-100 text-amber-700 border-amber-300",
-  dangerous: "bg-red-100 text-red-700 border-red-300",
-};
-
 export function SecurityBadge({
   level,
   score,
+  size = "sm",
 }: {
   level: RiskLevel | null;
-  score: number | null;
+  score?: number | null;
+  size?: "sm" | "xs";
 }) {
   if (!level || level === "safe") return null;
+  const m = RISK_META[level];
+  const pad = size === "xs" ? "px-1.5 py-0.5 text-[10px]" : "px-2 py-0.5 text-xs";
   return (
     <span
-      className={`text-xs font-semibold px-2 py-0.5 rounded border ${RISK_STYLE[level]}`}
-      title={`Risk score: ${score ?? "?"}/100`}
+      className={`inline-flex items-center gap-1 rounded-full border font-medium ${pad} ${m.chip}`}
     >
-      🛡 {level.toUpperCase()} {score ?? ""}
+      <span>{m.emoji}</span>
+      {m.label}
+      {typeof score === "number" ? ` ${score}` : ""}
     </span>
   );
+}
+
+export function Dot({ category }: { category: EmailCategory | null }) {
+  if (!category) return <span className="h-2 w-2 rounded-full bg-slate-300" />;
+  return <span className={`h-2 w-2 rounded-full ${CATEGORY_META[category].dot}`} />;
 }

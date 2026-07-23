@@ -39,6 +39,7 @@ class NormalizedEmail:
     body_text: str | None
     snippet: str | None
     received_at: str | None
+    body_html: str | None = None
     attachments: list[dict] = field(default_factory=list)
 
     def to_payload(self) -> dict:
@@ -51,6 +52,7 @@ class NormalizedEmail:
             "cc_addresses": self.cc_addresses,
             "subject": self.subject,
             "body_text": self.body_text,
+            "body_html": self.body_html,
             "snippet": self.snippet,
             "received_at": self.received_at,
             "attachments": self.attachments,
@@ -216,6 +218,7 @@ class GmailConnector:
             cc_addresses=cc_list,
             subject=_header(headers, "Subject") or None,
             body_text=body_text[:50000] if body_text else None,
+            body_html=html.strip()[:200000] if html and html.strip() else None,
             snippet=msg.get("snippet"),
             received_at=received_at,
             attachments=_collect_attachments(payload),

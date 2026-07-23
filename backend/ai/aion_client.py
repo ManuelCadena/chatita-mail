@@ -123,28 +123,50 @@ class AIONBrainClient:
         result = await self._call_mcp_tool("aion_orchestrate", args)
         return self._normalize(result)
 
-    @staticmethod
-    def _normalize(data: dict[str, Any]) -> dict[str, Any]:
+    # Sentinel values AION Brain uses in its top-level "result" field that are
+    # status flags, NOT the model's textual answer.
+    _RESULT_FLAGS = {"error", "success", "policy_violation", "ok", "completed"}
+
+    @classmethod
+    def _normalize(cls, data: dict[str, Any]) -> dict[str, Any]:
         """
         Map AION Brain's orchestrate response to Chatita Mail's expected shape.
 
-        AION returns the model answer at data["execution"]["output"]; we surface
-        it as {"text": ...} plus routing/cost metadata for observability.
+        AION Brain's HTTP pipeline has evolved across versions and returns the
+        model answer in different places depending on the path:
+          - data["execution"]["output"]   (tool-augmented / older shape)
+          - data["output"]                (12-layer pipeline success shape)
+          - data["result"]                (plain-text paths; but can be a flag)
+          - data["text"]                  (some direct paths)
+        We also detect error/policy states (data["error"] or result == "error")
+        so callers fall back cleanly instead of treating an error as an answer.
         """
         if not isinstance(data, dict):
-            return {"text": str(data)}
+            return {"text": str(data), "ok": bool(data)}
+
         execution = data.get("execution") or {}
-        text = execution.get("output")
-        if text is None:
-            # Some tools/paths return plain text already
-            text = data.get("text", "")
+        result_field = data.get("result")
+
+        text = execution.get("output") or data.get("output")
+        if not text and isinstance(result_field, str) and result_field not in cls._RESULT_FLAGS:
+            text = result_field
+        if not text:
+            text = data.get("text", "") or ""
+
+        err = data.get("error")
+        is_error = bool(err) or result_field == "error" or result_field == "policy_violation"
+        ok = (not is_error) and bool(text)
+
         return {
             "text": text,
+            "ok": ok,
+            "error": err,
+            "result_flag": result_field if isinstance(result_field, str) else None,
             "model": data.get("selectedModel"),
-            "provider": execution.get("provider"),
+            "provider": execution.get("provider") or data.get("routedApi"),
             "routed_api": data.get("routedApi"),
             "estimated_cost": data.get("estimatedCost"),
-            "latency_ms": data.get("totalLatency"),
+            "latency_ms": data.get("totalLatency") or data.get("processingTime"),
             "raw": data,
         }
 

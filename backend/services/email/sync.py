@@ -77,6 +77,7 @@ class GmailSyncService:
             cc_addresses=ne.cc_addresses,
             subject=ne.subject,
             body_text=ne.body_text,
+            body_html=ne.body_html,
             snippet=ne.snippet or (ne.body_text or "")[:200],
             attachments=ne.attachments,
             received_at=received,

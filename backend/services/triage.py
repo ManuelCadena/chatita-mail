@@ -34,8 +34,12 @@ from backend.models.entities import (
 )
 from backend.services.notifier import TelegramNotifier
 from backend.services.unsubscribe import Unsubscriber
+from backend.services.workflow import TaskExtractor
 
 logger = logging.getLogger("chatita_mail.triage")
+
+# Categories that trigger Phase-2 task/commitment extraction.
+_EXTRACT_CATEGORIES = (EmailCategory.CRITICAL, EmailCategory.IMPORTANT)
 
 
 @dataclass
@@ -48,6 +52,8 @@ class TriageOutcome:
     risk_score: int
     status: EmailStatus
     actions: list[str]
+    tasks: int = 0
+    commitments: int = 0
 
 
 class TriageService:
@@ -58,12 +64,14 @@ class TriageService:
         injection: PromptInjectionDefense | None = None,
         notifier: TelegramNotifier | None = None,
         unsubscriber: Unsubscriber | None = None,
+        task_extractor: TaskExtractor | None = None,
     ) -> None:
         self.classifier = classifier or EmailClassifier()
         self.phishing = phishing or PhishingDetector()
         self.injection = injection or PromptInjectionDefense()
         self.notifier = notifier or TelegramNotifier()
         self.unsubscriber = unsubscriber or Unsubscriber()
+        self.task_extractor = task_extractor or TaskExtractor()
 
     async def triage_email(
         self, session: AsyncSession, email: Email, auto_actions: bool = True
@@ -107,6 +115,24 @@ class TriageService:
         # 5) Persist
         await self._persist(session, email, cls, sec, new_status)
 
+        # 6) Phase 2: extract tasks/commitments for high-value mail that stays in inbox
+        n_tasks = n_commits = 0
+        if (
+            cls.category in _EXTRACT_CATEGORIES
+            and new_status == EmailStatus.INBOX
+            and sec.recommended_action == "allow"
+        ):
+            try:
+                extraction = await self.task_extractor.extract_and_persist(
+                    session, email, replace=True
+                )
+                n_tasks = len(extraction.tasks)
+                n_commits = len(extraction.commitments)
+                if n_tasks or n_commits:
+                    actions.append(f"extracted:{n_tasks}t/{n_commits}c:{extraction.source}")
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Task extraction failed for %s: %s", email.id, exc)
+
         return TriageOutcome(
             email_id=email.id,
             category=cls.category,
@@ -116,6 +142,8 @@ class TriageService:
             risk_score=sec.risk_score,
             status=new_status,
             actions=actions,
+            tasks=n_tasks,
+            commitments=n_commits,
         )
 
     # ── Actions ─────────────────────────────────────────────

@@ -37,12 +37,67 @@ class EmailOut(BaseModel):
     status: EmailStatus
     is_read: bool
     received_at: datetime | None
+    thread_id: str | None = None
+    has_html: bool = False
+    has_attachments: bool = False
     category: EmailCategory | None = None
     confidence: float | None = None
+    is_newsletter: bool = False
+    unsubscribe_url: str | None = None
     risk_level: RiskLevel | None = None
     risk_score: int | None = None
 
     model_config = {"from_attributes": True}
+
+
+# ── Actions ─────────────────────────────────────────────────
+class StatusUpdateIn(BaseModel):
+    status: EmailStatus
+
+
+class ReadUpdateIn(BaseModel):
+    is_read: bool = True
+
+
+# ── Stats (sidebar counts) ──────────────────────────────────
+class InboxStats(BaseModel):
+    total: int
+    unread: int
+    by_status: dict[str, int]
+    by_category: dict[str, int]
+    open_tasks: int
+    open_commitments: int
+    time_saved_minutes: int
+
+
+# ── Phase 2: Tasks & Commitments ────────────────────────────
+class TaskOut(BaseModel):
+    id: str
+    email_id: str
+    description: str
+    task_type: str | None = None
+    priority: str | None = None
+    deadline: datetime | None = None
+    status: str
+    created_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class CommitmentOut(BaseModel):
+    id: str
+    email_id: str
+    who: str
+    what: str
+    deadline: datetime | None = None
+    status: str
+    created_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class TaskStatusIn(BaseModel):
+    status: str  # pending | done | dismissed
 
 
 # ── Classification ──────────────────────────────────────────

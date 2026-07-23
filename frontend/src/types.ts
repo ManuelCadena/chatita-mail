@@ -27,8 +27,13 @@ export interface EmailListItem {
   status: EmailStatus;
   is_read: boolean;
   received_at: string | null;
+  thread_id: string | null;
+  has_html: boolean;
+  has_attachments: boolean;
   category: EmailCategory | null;
   confidence: number | null;
+  is_newsletter: boolean;
+  unsubscribe_url: string | null;
   risk_level: RiskLevel | null;
   risk_score: number | null;
 }
@@ -38,6 +43,8 @@ export interface ClassificationDetail {
   confidence: number;
   stage: string;
   reasoning: string | null;
+  is_newsletter: boolean;
+  unsubscribe_url: string | null;
 }
 
 export interface SecurityDetail {
@@ -48,14 +55,68 @@ export interface SecurityDetail {
   recommended_action: string;
 }
 
+export interface Attachment {
+  filename?: string;
+  mime_type?: string;
+  size?: number;
+  [k: string]: unknown;
+}
+
+export interface Task {
+  id: string;
+  email_id: string;
+  description: string;
+  task_type: string | null;
+  priority: string | null;
+  deadline: string | null;
+  status: string;
+  created_at: string | null;
+}
+
+export interface Commitment {
+  id: string;
+  email_id: string;
+  who: string;
+  what: string;
+  deadline: string | null;
+  status: string;
+  created_at: string | null;
+}
+
 export interface EmailDetail {
   id: string;
   from_address: string;
   from_name: string | null;
+  to_addresses: string[];
+  cc_addresses: string[];
   subject: string | null;
   body_text: string | null;
+  body_html: string | null;
+  snippet: string | null;
+  attachments: Attachment[];
   status: EmailStatus;
+  is_read: boolean;
+  thread_id: string | null;
   received_at: string | null;
   classification: ClassificationDetail | null;
   security: SecurityDetail | null;
+  tasks: Task[];
+  commitments: Commitment[];
+}
+
+export interface InboxStats {
+  total: number;
+  unread: number;
+  by_status: Record<string, number>;
+  by_category: Record<string, number>;
+  open_tasks: number;
+  open_commitments: number;
+  time_saved_minutes: number;
+}
+
+export interface SyncResult {
+  pulled?: number;
+  upserted?: number;
+  triaged?: number;
+  [k: string]: unknown;
 }
