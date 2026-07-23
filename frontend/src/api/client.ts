@@ -11,8 +11,11 @@ import type {
   Task,
 } from "../types";
 
+// API base: local dev uses the Vite proxy ("/api"); prod behind nginx at
+// chatita.ai/mail/ builds with VITE_API_BASE=/mail-api so calls reach the mail
+// backend (not the Chatita gateway mounted at "/").
 const api = axios.create({
-  baseURL: "/api",
+  baseURL: import.meta.env.VITE_API_BASE || "/api",
   timeout: 60000,
 });
 
