@@ -117,4 +117,37 @@ export async function updateTask(id: string, status: string): Promise<Task> {
   return data;
 }
 
+// ── Phase 2: Composer (summaries + reply drafts) ───────────
+export interface EmailSummary {
+  tldr: string;
+  key_points: string[];
+  suggested_action: string;
+  requires_reply: boolean;
+  source: string;
+}
+
+export interface ReplyDraft {
+  subject: string;
+  body: string;
+  tone: string;
+  source: string;
+}
+
+export async function summarizeEmail(id: string): Promise<EmailSummary> {
+  const { data } = await api.post<EmailSummary>(`/inbox/emails/${id}/summarize`);
+  return data;
+}
+
+export async function draftReply(
+  id: string,
+  tone = "professional",
+  instructions?: string
+): Promise<ReplyDraft> {
+  const { data } = await api.post<ReplyDraft>(`/inbox/emails/${id}/draft-reply`, {
+    tone,
+    instructions,
+  });
+  return data;
+}
+
 export default api;

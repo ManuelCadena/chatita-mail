@@ -1,5 +1,5 @@
 // Chatita Mail v3.0 — right pane: full email view + actions + XAI + Phase-2 tasks
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import DOMPurify from "dompurify";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
@@ -15,15 +15,23 @@ import {
   Paperclip,
   Bot,
   ShieldAlert,
+  FileText,
+  Reply,
+  Copy,
+  Loader2,
 } from "lucide-react";
 import {
+  draftReply,
   extractTasks,
   getEmail,
   releaseFromQuarantine,
   setRead,
   setStatus,
+  summarizeEmail,
   unsubscribeEmail,
   updateTask,
+  type EmailSummary,
+  type ReplyDraft,
 } from "../api/client";
 import { useUI } from "../store";
 import { CategoryBadge, SecurityBadge } from "./badges";
@@ -82,6 +90,28 @@ export default function ReadingPane() {
     onSuccess: () => refresh(),
   });
 
+  // Phase 2: composer state
+  const [summary, setSummary] = useState<EmailSummary | null>(null);
+  const [draft, setDraft] = useState<ReplyDraft | null>(null);
+  const [tone, setTone] = useState("professional");
+
+  const summarizeMut = useMutation({
+    mutationFn: () => summarizeEmail(selectedEmailId as string),
+    onSuccess: (r) => setSummary(r),
+    onError: (e: unknown) => toast.error((e as Error).message),
+  });
+  const draftMut = useMutation({
+    mutationFn: () => draftReply(selectedEmailId as string, tone),
+    onSuccess: (r) => setDraft(r),
+    onError: (e: unknown) => toast.error((e as Error).message),
+  });
+
+  // Clear AI summary/draft when the selected email changes.
+  useEffect(() => {
+    setSummary(null);
+    setDraft(null);
+  }, [selectedEmailId]);
+
   const sanitized = useMemo(() => {
     if (!data?.body_html) return null;
     return DOMPurify.sanitize(data.body_html, {
@@ -132,6 +162,19 @@ export default function ReadingPane() {
           onClick={() => extractMut.mutate()}
           disabled={extractMut.isPending}
         />
+        <div className="mx-1 h-5 w-px bg-slate-200" />
+        <ToolbarBtn
+          icon={summarizeMut.isPending ? <Loader2 size={16} className="animate-spin" /> : <FileText size={16} />}
+          label={summarizeMut.isPending ? "Summarizing…" : "Summarize"}
+          onClick={() => summarizeMut.mutate()}
+          disabled={summarizeMut.isPending}
+        />
+        <ToolbarBtn
+          icon={draftMut.isPending ? <Loader2 size={16} className="animate-spin" /> : <Reply size={16} />}
+          label={draftMut.isPending ? "Drafting…" : "Draft reply"}
+          onClick={() => draftMut.mutate()}
+          disabled={draftMut.isPending}
+        />
       </div>
 
       {/* Scroll body */}
@@ -147,6 +190,29 @@ export default function ReadingPane() {
             score={data.security?.risk_score ?? null}
           />
         </div>
+
+        {/* AI summary (Phase 2) */}
+        {summary && (
+          <Panel
+            icon={<FileText size={14} />}
+            tone="slate"
+            title={`AI summary${summary.source === "fallback" ? " (fallback)" : ""}`}
+          >
+            <p className="text-sm text-slate-800 mb-2">{summary.tldr}</p>
+            {summary.key_points.length > 0 && (
+              <ul className="list-disc list-inside text-sm text-slate-600 mb-2">
+                {summary.key_points.map((p, i) => (
+                  <li key={i}>{p}</li>
+                ))}
+              </ul>
+            )}
+            {summary.suggested_action && (
+              <p className="text-xs text-slate-500">
+                <b>Next:</b> {summary.suggested_action}
+              </p>
+            )}
+          </Panel>
+        )}
 
         {/* Sender block */}
         <div className="flex items-start gap-3 pb-4 mb-4 border-b border-slate-100">
@@ -266,6 +332,63 @@ export default function ReadingPane() {
         ) : (
           <div className="whitespace-pre-wrap text-sm text-slate-800 leading-relaxed">
             {data.body_text || "(empty body)"}
+          </div>
+        )}
+
+        {/* Reply composer (Phase 2) */}
+        {draft && (
+          <div className="mt-6 rounded-xl border border-indigo-200 bg-indigo-50/50 p-4">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-indigo-600">
+                <Reply size={14} /> Draft reply
+                {draft.source === "fallback" && (
+                  <span className="text-slate-400 normal-case">(fallback)</span>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5">
+                <select
+                  value={tone}
+                  onChange={(e) => setTone(e.target.value)}
+                  className="text-xs rounded-md border border-slate-200 bg-white px-2 py-1"
+                >
+                  {["professional", "friendly", "brief", "formal", "warm"].map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
+                <button
+                  onClick={() => draftMut.mutate()}
+                  disabled={draftMut.isPending}
+                  className="text-xs rounded-md border border-slate-200 bg-white px-2 py-1 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  {draftMut.isPending ? "…" : "Regenerate"}
+                </button>
+              </div>
+            </div>
+            <input
+              value={draft.subject}
+              onChange={(e) => setDraft({ ...draft, subject: e.target.value })}
+              className="w-full mb-2 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-sm font-medium"
+            />
+            <textarea
+              value={draft.body}
+              onChange={(e) => setDraft({ ...draft, body: e.target.value })}
+              rows={8}
+              className="w-full rounded-md border border-slate-200 bg-white px-2.5 py-2 text-sm leading-relaxed resize-y"
+            />
+            <div className="mt-2 flex items-center gap-2">
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(draft.body);
+                  toast.success("Reply copied");
+                }}
+                className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 text-white text-xs px-3 py-1.5 hover:bg-slate-700"
+              >
+                <Copy size={14} /> Copy reply
+              </button>
+              <span className="text-[11px] text-slate-400">
+                Editable draft · sending not enabled yet (read-only scope)
+              </span>
+            </div>
           </div>
         )}
       </div>

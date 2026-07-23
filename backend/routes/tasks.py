@@ -16,11 +16,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.models.db import get_session
 from backend.models.entities import Commitment, Email, Task
 from backend.models.schemas import CommitmentOut, TaskOut, TaskStatusIn
-from backend.services.workflow import TaskExtractor
+from backend.services.workflow import Composer, TaskExtractor
+from pydantic import BaseModel
 
 router = APIRouter(prefix="/api", tags=["workflow"])
 
 _extractor = TaskExtractor()
+_composer = Composer()
+
+
+class DraftReplyIn(BaseModel):
+    tone: str = "professional"
+    instructions: str | None = None
 
 
 @router.get("/tasks", response_model=list[TaskOut])
@@ -110,3 +117,47 @@ async def update_commitment(
     c.status = payload.status
     await session.flush()
     return CommitmentOut.model_validate(c)
+
+
+# ── Phase 2: Composer (AION Brain) ──────────────────────────
+async def _load_email(session: AsyncSession, email_id: str) -> Email:
+    email = await session.scalar(select(Email).where(Email.id == email_id))
+    if not email:
+        raise HTTPException(status_code=404, detail="Email not found")
+    return email
+
+
+@router.post("/inbox/emails/{email_id}/summarize")
+async def summarize_email(
+    email_id: str, session: AsyncSession = Depends(get_session)
+) -> dict:
+    """AI TL;DR + key points + suggested action for one email."""
+    email = await _load_email(session, email_id)
+    r = await _composer.summarize_email(email)
+    return {
+        "email_id": email_id,
+        "tldr": r.tldr,
+        "key_points": r.key_points,
+        "suggested_action": r.suggested_action,
+        "requires_reply": r.requires_reply,
+        "source": r.source,
+    }
+
+
+@router.post("/inbox/emails/{email_id}/draft-reply")
+async def draft_reply(
+    email_id: str,
+    payload: DraftReplyIn | None = None,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Generate an editable reply draft in Manny's voice."""
+    email = await _load_email(session, email_id)
+    payload = payload or DraftReplyIn()
+    r = await _composer.draft_reply(email, tone=payload.tone, instructions=payload.instructions)
+    return {
+        "email_id": email_id,
+        "subject": r.subject,
+        "body": r.body,
+        "tone": r.tone,
+        "source": r.source,
+    }
