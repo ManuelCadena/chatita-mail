@@ -14,9 +14,32 @@
 | **Motor AI** | AION Brain v3.2 vía **MCP** (ya publicado) |
 | **Repo** | https://github.com/ManuelCadena/chatita-mail |
 | **Autor** | Manuel Cadena |
-| **Última actualización** | 22-Jul-2026 08:25 (UTC-06:00) |
-| **Fase actual** | 🟢 **FASE 2 EN CURSO** — UI robusta v3 (3 paneles, HTML, XAI, acciones) + TaskExtractor verificados E2E. ⚠️ R-1: AION orchestrate en fallback (regresión externa). Pendiente: iCloud, sync incremental, deploy prod |
+| **Última actualización** | 23-Jul-2026 13:56 (UTC-06:00) |
+| **Fase actual** | 🟢 **DESPLEGADO EN PROD** — https://chatita.ai/mail/ (SPA) + /mail-api/ (backend). Fase 2 completa (UI 3 paneles, HTML, XAI, acciones, TaskExtractor, Composer). R-1 cerrado (era local-only; prod sano). Pendiente: iCloud, sync incremental/full |
 | **Meta usuario** | ≤5 min/día en email · 100% importantes atendidos · 0% spam |
+
+---
+
+## 🚀 DEPLOY PROD — 23-Jul-2026 (VERIFICADO)
+
+Servidor: `chatita.ai` (54.212.177.221), SSH puerto 2222, `ec2-user`.
+
+| Componente | Estado | Evidencia (M-CHEX) |
+|---|---|---|
+| Infra | Python 3.11.13 · redis6 (PONG) · PostgreSQL role `chatita` + db `chatita_mail` + pgvector | comandos exit 0 |
+| Código | rsync → `/opt/chatita-mail` (backend, scripts, `frontend/dist`, SA json, `.env` prod) | `ls -la` prod |
+| Deps | venv `python3.11` + `pip install -r backend/requirements.txt` OK | "deps installed OK" |
+| Schema | 8 tablas + `embeddings.vector` 1024-dim | `setup_db.py` ✅ Done |
+| Servicio | `chatita-mail.service` systemd **active** (uvicorn :8000, 127.0.0.1) | `systemctl is-active` = active |
+| Health | `database:true, redis:true, aion_brain reachable:true (200)` | `/health` JSON |
+| nginx | `/mail/` (SPA alias dist) + `/mail-api/` (proxy :8000/api/) | `nginx -t` ok + RELOADED |
+| Público | `https://chatita.ai/mail/` 200 · JS asset 200 · `/mail-api/inbox/stats` 200 | curl `HTTP 200` |
+| E2E real | Gmail SA `jose@manuelcadena.com` (31,476 msgs) · sync 10 fetched/created/triaged · AION clasificando (NOISE @0.92) · stats total=10, time_saved=15min | curl JSON |
+
+Backups nginx: `/etc/nginx/conf.d/chatita.ai.conf.bak-mail-20260723-135448`.
+Prod `.env`: DB local (chatita), redis local, `AION_BRAIN_URL=http://127.0.0.1:3100` con `AION_API_KEY`, `GOOGLE_SERVICE_ACCOUNT_JSON=/opt/chatita-mail/chatita-service-account.json`, `GMAIL_IMPERSONATE_SUBJECT=jose@manuelcadena.com`.
+
+Pendiente opcional: sync full/incremental (31k emails), conector iCloud.
 
 ---
 
