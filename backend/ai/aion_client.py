@@ -42,6 +42,15 @@ class AIONBrainClient:
         self.allow_fallback = (
             settings.aion_allow_fallback if allow_fallback is None else allow_fallback
         )
+        self.api_key = settings.aion_api_key
+
+    def _headers(self) -> dict[str, str]:
+        """Auth headers for AION Brain (X-API-Key + Bearer when configured)."""
+        h = {"Content-Type": "application/json"}
+        if self.api_key:
+            h["X-API-Key"] = self.api_key
+            h["Authorization"] = f"Bearer {self.api_key}"
+        return h
 
     # ── Public API ──────────────────────────────────────────
     async def orchestrate(
@@ -72,6 +81,7 @@ class AIONBrainClient:
                     resp = await client.post(
                         f"{self.base_url}/execute_tool",
                         json={"toolName": tool, "parameters": params},
+                        headers=self._headers(),
                     )
                     resp.raise_for_status()
                     return resp.json()
@@ -111,7 +121,9 @@ class AIONBrainClient:
             "priority": kwargs.get("priority", "P2"),
         }
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            resp = await client.post(f"{self.base_url}/orchestrate", json=payload)
+            resp = await client.post(
+                f"{self.base_url}/orchestrate", json=payload, headers=self._headers()
+            )
             resp.raise_for_status()
             return self._normalize(resp.json())
 

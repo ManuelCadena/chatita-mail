@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     aion_brain_url: str = "http://localhost:3100"
     aion_brain_mcp_path: str = "/opt/aion-brain/mcp-server.js"
     aion_timeout_seconds: int = 60
+    # API key sent as X-API-Key to AION Brain (required in prod; local dev may
+    # leave empty if AION_AUTH_DISABLED=1 on the server).
+    aion_api_key: str = ""
     # If AION Brain is unreachable, fall back to a local heuristic
     aion_allow_fallback: bool = True
 
