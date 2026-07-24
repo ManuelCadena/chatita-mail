@@ -199,6 +199,49 @@ class ICloudConnector:
             except Exception:  # noqa: BLE001
                 pass
 
+    def count_inbox(self) -> int:
+        """Return the total message count in INBOX (cheap SELECT, no SEARCH)."""
+        imap = self._connect()
+        try:
+            status, sel = imap.select("INBOX", readonly=True)
+            if status != "OK" or not sel or not sel[0]:
+                return 0
+            try:
+                return int(sel[0])
+            except (ValueError, TypeError):
+                return 0
+        finally:
+            try:
+                imap.logout()
+            except Exception:  # noqa: BLE001
+                pass
+
+    def fetch_seqs(self, seqs: list[bytes]) -> list[NormalizedEmail]:
+        """
+        Fetch + normalize a specific list of IMAP sequence numbers over one
+        connection. Used by the resumable backfill script to stream the inbox
+        in bounded chunks (avoids loading 10k+ messages into memory at once).
+        """
+        if not seqs:
+            return []
+        imap = self._connect()
+        try:
+            imap.select("INBOX", readonly=True)
+            out: list[NormalizedEmail] = []
+            for seq in seqs:
+                try:
+                    ne = self._fetch_and_normalize(imap, seq)
+                    if ne:
+                        out.append(ne)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Failed to parse iCloud message %s: %s", seq, exc)
+            return out
+        finally:
+            try:
+                imap.logout()
+            except Exception:  # noqa: BLE001
+                pass
+
     def _fetch_and_normalize(
         self, imap: imaplib.IMAP4_SSL, uid: bytes
     ) -> NormalizedEmail | None:
