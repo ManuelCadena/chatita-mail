@@ -156,7 +156,7 @@ class ICloudConnector:
         """
         imap = self._connect()
         try:
-            imap.select("INBOX", readonly=True)
+            status_sel, sel = imap.select("INBOX", readonly=True)
 
             # Build IMAP SEARCH criteria
             criteria_parts: list[str] = []
@@ -164,25 +164,34 @@ class ICloudConnector:
                 criteria_parts.append("UNSEEN")
             if since_date:
                 criteria_parts.append(f'SINCE "{since_date.strftime(_DATE_FMT)}"')
-            criteria = " ".join(criteria_parts) if criteria_parts else "ALL"
 
-            status, data = imap.search(None, criteria)
-            if status != "OK" or not data or not data[0]:
-                return []
-
-            # UIDs are space-separated bytes; take the last max_results
-            uids = data[0].split()
-            uids = uids[-max_results:]  # newest UIDs are at the end
-            uids.reverse()              # newest first
+            if criteria_parts:
+                status, data = imap.search(None, " ".join(criteria_parts))
+                if status != "OK" or not data or not data[0]:
+                    return []
+                seqs = data[0].split()[-max_results:]  # newest at the end
+                seqs.reverse()                          # newest first
+            else:
+                # No filter → newest max_results by sequence range. We avoid
+                # `SEARCH ALL`, which returns every seq number in one line and
+                # can exceed imaplib's 1MB line limit on huge mailboxes (200k+).
+                try:
+                    total = int(sel[0]) if sel and sel[0] else 0
+                except (ValueError, TypeError):
+                    total = 0
+                if total == 0:
+                    return []
+                start = max(1, total - max_results + 1)
+                seqs = [str(i).encode() for i in range(total, start - 1, -1)]
 
             out: list[NormalizedEmail] = []
-            for uid in uids:
+            for seq in seqs:
                 try:
-                    ne = self._fetch_and_normalize(imap, uid)
+                    ne = self._fetch_and_normalize(imap, seq)
                     if ne:
                         out.append(ne)
                 except Exception as exc:  # noqa: BLE001
-                    logger.warning("Failed to parse iCloud message %s: %s", uid, exc)
+                    logger.warning("Failed to parse iCloud message %s: %s", seq, exc)
             return out
         finally:
             try:
@@ -193,13 +202,15 @@ class ICloudConnector:
     def _fetch_and_normalize(
         self, imap: imaplib.IMAP4_SSL, uid: bytes
     ) -> NormalizedEmail | None:
-        status, data = imap.fetch(uid, "(RFC822)")
-        if status != "OK" or not data or not data[0]:
+        # BODY.PEEK[] fetches the full raw message without setting \Seen.
+        # iCloud's server returns empty for (RFC822) on some messages
+        # (data[0] = b'<seq> ()'), so we require a proper (meta, bytes) tuple.
+        status, data = imap.fetch(uid, "(BODY.PEEK[])")
+        if status != "OK" or not data:
             return None
-
-        raw_bytes = data[0][1] if isinstance(data[0], tuple) else data[0]
-        if not isinstance(raw_bytes, bytes):
+        if not isinstance(data[0], tuple) or not isinstance(data[0][1], bytes):
             return None
+        raw_bytes = data[0][1]
 
         msg = email_lib.message_from_bytes(raw_bytes)
 
