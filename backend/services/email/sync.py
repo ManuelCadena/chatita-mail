@@ -9,6 +9,7 @@ Both services:
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -16,7 +17,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models.entities import AccountProvider, Email, EmailAccount
-from backend.services.email.gmail_connector import GmailConnector, NormalizedEmail
+from backend.services.email.gmail_connector import (
+    GmailConnector,
+    HistoryExpiredError,
+    NormalizedEmail,
+)
 from backend.services.email.icloud_connector import ICloudConnector
 from backend.services.triage import TriageService
 
@@ -84,6 +89,16 @@ async def _upsert_email(
     session.add(email)
     await session.flush()
     return email, True
+
+
+async def _existing_message_ids(
+    session: AsyncSession, account_id: str
+) -> set[str]:
+    """All provider_message_ids already stored for an account (fast de-dup)."""
+    rows = await session.scalars(
+        select(Email.provider_message_id).where(Email.account_id == account_id)
+    )
+    return set(rows.all())
 
 
 async def _run_triage(
@@ -157,6 +172,168 @@ class GmailSyncService:
             "provider": "gmail",
             "mailbox": mailbox,
             "fetched": len(normalized),
+            "created": created,
+            "triaged": triaged,
+            "results": results,
+        }
+
+    async def full_sync(
+        self,
+        session: AsyncSession,
+        query: str | None = "in:inbox",
+        label_ids: list[str] | None = None,
+        max_total: int | None = None,
+        run_triage: bool = False,
+        batch_size: int = 100,
+    ) -> dict:
+        """
+        Backfill the mailbox: paginate ALL matching message IDs, fetch+upsert in
+        batches (committing per batch for resumability), skipping already-stored
+        messages. Anchors last_history_id from the profile BEFORE fetching so a
+        later incremental sync catches anything that arrives mid-backfill.
+
+        Heavy operation — run via BackgroundTasks or scripts/backfill_gmail.py.
+        Triage defaults OFF (cost/latency): use /triage/pending afterwards.
+        """
+        mailbox = self.connector.subject
+        account = await _get_or_create_account(session, mailbox, AccountProvider.GMAIL)
+        account.sync_status = "running"
+        await session.commit()
+
+        # Anchor history BEFORE listing (avoid gap between list and incremental).
+        anchor = await asyncio.to_thread(self.connector.get_profile_history_id)
+
+        try:
+            all_ids = await asyncio.to_thread(
+                self.connector.list_message_ids,
+                query,
+                label_ids,
+                False,
+                max_total,
+            )
+            existing = await _existing_message_ids(session, account.id)
+            todo = [mid for mid in all_ids if mid not in existing]
+
+            created = 0
+            triaged = 0
+            failed = 0
+            for i, mid in enumerate(todo, start=1):
+                try:
+                    ne = await asyncio.to_thread(self.connector.fetch_normalized, mid)
+                    email, was_created = await _upsert_email(session, account, ne)
+                    created += int(was_created)
+                    if run_triage and was_created:
+                        await _run_triage(self.triage, session, email)
+                        triaged += 1
+                except Exception as exc:  # noqa: BLE001
+                    failed += 1
+                    logger.warning("full_sync: failed msg %s: %s", mid, exc)
+                if i % batch_size == 0:
+                    await session.commit()
+                    logger.info("full_sync progress: %d/%d (created=%d)", i, len(todo), created)
+
+            if anchor:
+                account.last_history_id = anchor
+            account.last_sync_at = datetime.now(tz=timezone.utc)
+            account.sync_status = "idle"
+            await session.commit()
+            return {
+                "provider": "gmail",
+                "mailbox": mailbox,
+                "listed": len(all_ids),
+                "already_present": len(all_ids) - len(todo),
+                "created": created,
+                "triaged": triaged,
+                "failed": failed,
+                "anchor_history_id": anchor,
+            }
+        except Exception:
+            account.sync_status = "error"
+            await session.commit()
+            raise
+
+    async def sync_incremental(
+        self, session: AsyncSession, run_triage: bool = True
+    ) -> dict:
+        """
+        Delta sync via users.history.list (messageAdded) anchored on
+        last_history_id. Bootstraps the anchor on first run. Falls back to a
+        newest-N pull if the stored historyId has expired (Gmail 404).
+        """
+        mailbox = self.connector.subject
+        account = await _get_or_create_account(session, mailbox, AccountProvider.GMAIL)
+
+        # Avoid racing a running backfill (duplicate-key inserts on same msg id).
+        if account.sync_status == "running":
+            return {"provider": "gmail", "mailbox": mailbox, "skipped": "backfill_running"}
+
+        # Bootstrap: no anchor yet → set it and pull a small recent window.
+        if not account.last_history_id:
+            anchor = await asyncio.to_thread(self.connector.get_profile_history_id)
+            account.last_history_id = anchor
+            recent = await asyncio.to_thread(self.connector.list_inbox, 10, False)
+            created = 0
+            for ne in recent:
+                email, was_created = await _upsert_email(session, account, ne)
+                created += int(was_created)
+                if run_triage and was_created:
+                    await _run_triage(self.triage, session, email)
+            account.last_sync_at = datetime.now(tz=timezone.utc)
+            return {
+                "provider": "gmail", "mailbox": mailbox, "bootstrapped": True,
+                "anchor_history_id": anchor, "created": created,
+            }
+
+        start = account.last_history_id
+        try:
+            new_ids, new_hid = await asyncio.to_thread(
+                self.connector.list_history_added, start, "INBOX"
+            )
+        except HistoryExpiredError:
+            logger.warning("history %s expired → newest-N fallback", start)
+            recent = await asyncio.to_thread(self.connector.list_inbox, 25, False)
+            created = 0
+            for ne in recent:
+                email, was_created = await _upsert_email(session, account, ne)
+                created += int(was_created)
+                if run_triage and was_created:
+                    await _run_triage(self.triage, session, email)
+            account.last_history_id = await asyncio.to_thread(
+                self.connector.get_profile_history_id
+            )
+            account.last_sync_at = datetime.now(tz=timezone.utc)
+            return {
+                "provider": "gmail", "mailbox": mailbox, "history_expired": True,
+                "created": created, "anchor_history_id": account.last_history_id,
+            }
+
+        created = 0
+        triaged = 0
+        results: list[dict] = []
+        for mid in new_ids:
+            try:
+                ne = await asyncio.to_thread(self.connector.fetch_normalized, mid)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("incremental: fetch %s failed: %s", mid, exc)
+                continue
+            email, was_created = await _upsert_email(session, account, ne)
+            created += int(was_created)
+            item = {"email_id": email.id, "from": ne.from_address,
+                    "subject": ne.subject, "created": was_created}
+            if run_triage and was_created:
+                item.update(await _run_triage(self.triage, session, email))
+                triaged += 1
+            results.append(item)
+
+        if new_hid:
+            account.last_history_id = new_hid
+        account.last_sync_at = datetime.now(tz=timezone.utc)
+        return {
+            "provider": "gmail",
+            "mailbox": mailbox,
+            "since_history_id": start,
+            "new_history_id": new_hid,
+            "added": len(new_ids),
             "created": created,
             "triaged": triaged,
             "results": results,

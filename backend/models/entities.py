@@ -80,6 +80,10 @@ class EmailAccount(Base):
     display_name: Mapped[str | None] = mapped_column(String(255))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Gmail incremental sync anchor (users.history.list startHistoryId)
+    last_history_id: Mapped[str | None] = mapped_column(String(64))
+    # idle | running | error — surfaced by /sync/status for long backfills
+    sync_status: Mapped[str | None] = mapped_column(String(32), default="idle")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     emails: Mapped[list[Email]] = relationship(back_populates="account", cascade="all, delete-orphan")

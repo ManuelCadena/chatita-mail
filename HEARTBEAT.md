@@ -15,7 +15,7 @@
 | **Repo** | https://github.com/ManuelCadena/chatita-mail |
 | **Autor** | Manuel Cadena |
 | **Última actualización** | 23-Jul-2026 13:56 (UTC-06:00) |
-| **Fase actual** | 🟢 **DESPLEGADO EN PROD** — https://chatita.ai/mail/ (SPA) + /mail-api/ (backend). Fase 2 completa (UI 3 paneles, HTML, XAI, acciones, TaskExtractor, Composer). R-1 cerrado (era local-only; prod sano). Pendiente: iCloud, sync incremental/full |
+| **Fase actual** | 🟢 **PROD + INGESTA ROBUSTA** — https://chatita.ai/mail/. Backfill Gmail completo (29,821 emails), incremental por historyId + systemd timer c/5min (auto-triage). iCloud connector wired (creds pendientes). Pendiente: triage histórico (29k untriaged), Fase 3 personalización |
 | **Meta usuario** | ≤5 min/día en email · 100% importantes atendidos · 0% spam |
 
 ---
@@ -493,6 +493,7 @@ Email entrante
 | 23-Jul-2026 02:40 | FASE 2 (workflow): TaskExtractor (services/workflow) vía AION Brain → tasks+commitments JSON con fallback regex; rutas /api/tasks, /commitments, .../extract; wired en triage para CRITICAL/IMPORTANT | HECHO VERIFICADO | import OK, 9/9 tests; /api/tasks 200; extracción corre (source=fallback por regresión AION, ver R-1) |
 | 23-Jul-2026 02:40 | Backend data layer: /api/inbox/stats (counts+time-saved), list con search/unread, EmailOut enriquecido, get_email con body_html+recipients+attachments+tasks+auto-read, acciones status/read/unsubscribe | HECHO VERIFICADO | /stats devuelve by_status/by_category reales; get_email retorna html+is_read=true tras abrir |
 | 23-Jul-2026 02:40 | Fix conector Gmail: body_html se extraía pero se descartaba → ahora persiste (gmail_connector+sync); aion_client._normalize robusto a múltiples shapes + detección de error | HECHO VERIFICADO | re-sync: 20/59 emails con HTML real; UI renderiza HTML |
+| 23-Jul-2026 21:30 | INGESTA ROBUSTA + FULL SYNC: gmail_connector (paginación pageToken, get_profile_history_id, history.list delta + HistoryExpiredError, fetch_normalized); sync.py full_sync (batched/resumable/dedup) + sync_incremental (historyId, bootstrap, guard sync_status=running); 6 rutas nuevas (/sync/gmail/full, /incremental, /sync/icloud, /icloud/health, /sync/status, /triage/pending con BackgroundTasks); EmailAccount +last_history_id +sync_status; scripts/backfill_gmail.py resumable | DEPLOY-VERIFICADO | Backfill prod: listed=29831 created=29821 failed=0 (1645s); systemd timer chatita-mail-sync.timer c/5min fired→delta 9861751→9861858 added=1 SPAM auto-archived (llm); /sync/status total=29849 hist=9861858; incremental manual added=0 up-to-date; icloud/health graceful (not configured) |
 | 23-Jul-2026 02:40 | UI OVERHAUL v3 (React): layout 3 paneles — Sidebar (folders+counts+sync+time-saved), EmailList (avatars/badges/unread/search), ReadingPane (HTML sanitizado DOMPurify+toolbar+XAI+tasks), TasksView, header con search+unread | BUILD-VERIFICADO + E2E | npm build exit 0 (1994 mods); Playwright :5173/mail: sidebar counts, lista 25 emails reales, reading pane con body HTML + panel XAI + mark-read; 0 errores consola |
 
 ---

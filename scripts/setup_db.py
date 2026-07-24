@@ -62,6 +62,15 @@ async def create_schema() -> None:
         await conn.run_sync(Base.metadata.create_all)
         print("[setup_db] Tables created")
 
+        # Idempotent column migrations for pre-existing installs (create_all
+        # does not ALTER existing tables).
+        for stmt in (
+            "ALTER TABLE email_accounts ADD COLUMN IF NOT EXISTS last_history_id VARCHAR(64)",
+            "ALTER TABLE email_accounts ADD COLUMN IF NOT EXISTS sync_status VARCHAR(32) DEFAULT 'idle'",
+        ):
+            await conn.execute(text(stmt))
+        print("[setup_db] email_accounts sync columns ensured (last_history_id, sync_status)")
+
         if has_vector:
             # Add 1024-dim vector column (BGE-M3) if not present
             await conn.execute(

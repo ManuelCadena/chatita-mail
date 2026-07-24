@@ -5,12 +5,13 @@ Endpoints to ingest, list, and read emails.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from backend.models.db import get_session
+from backend.config import settings
+from backend.models.db import AsyncSessionLocal, get_session
 from backend.models.entities import (
     AccountProvider,
     Classification,
@@ -31,12 +32,19 @@ from backend.models.schemas import (
     TaskOut,
 )
 from backend.services.email.gmail_connector import GmailConnector
-from backend.services.email.sync import GmailSyncService
+from backend.services.email.icloud_connector import ICloudConnector
+from backend.services.email.sync import (
+    GmailSyncService,
+    ICloudSyncService,
+)
+from backend.services.triage import TriageService
 from backend.services.unsubscribe import Unsubscriber
 
 router = APIRouter(prefix="/api/inbox", tags=["inbox"])
 
 _gmail_sync = GmailSyncService()
+_icloud_sync = ICloudSyncService()
+_triage = TriageService()
 _unsubscriber = Unsubscriber()
 
 # Minutes of manual triage saved per auto-handled email (archived/blocked/quarantined).
@@ -359,3 +367,175 @@ async def sync_gmail(
     return await _gmail_sync.sync(
         session, max_results=max_results, unread_only=unread_only, run_triage=triage
     )
+
+
+# ── Robust ingest: full backfill + incremental (historyId) ──
+
+
+async def _run_full_sync_bg(
+    query: str, label_ids: list[str] | None, max_total: int | None, run_triage: bool
+) -> None:
+    """Background full sync with its own DB session (request session is closed)."""
+    async with AsyncSessionLocal() as session:
+        try:
+            await _gmail_sync.full_sync(
+                session,
+                query=query,
+                label_ids=label_ids,
+                max_total=max_total,
+                run_triage=run_triage,
+            )
+        except Exception:  # noqa: BLE001
+            await session.rollback()
+            raise
+
+
+@router.post("/sync/gmail/full", tags=["gmail"])
+async def sync_gmail_full(
+    background: BackgroundTasks,
+    scope: str = Query("inbox", pattern="^(inbox|all)$", description="'inbox' or 'all' mail"),
+    max_total: int | None = Query(None, ge=1, description="Cap messages (None = every message)"),
+    triage: bool = Query(False, description="Run triage during backfill (slow/costly)"),
+    wait: bool = Query(False, description="Run synchronously and return the summary"),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """
+    Backfill the entire mailbox (paginated, batched, de-duplicated).
+
+    For large mailboxes (e.g. 31k) leave `wait=false` to run in the background
+    and poll `/api/inbox/sync/status`. Triage defaults OFF — run `/triage/pending`
+    afterwards in bounded batches.
+    """
+    query = "in:inbox" if scope == "inbox" else None
+    label_ids = None if scope == "inbox" else []
+    if wait:
+        return await _gmail_sync.full_sync(
+            session, query=query, label_ids=label_ids,
+            max_total=max_total, run_triage=triage,
+        )
+    background.add_task(_run_full_sync_bg, query, label_ids, max_total, triage)
+    return {
+        "status": "started",
+        "scope": scope,
+        "max_total": max_total,
+        "triage": triage,
+        "poll": "/api/inbox/sync/status",
+    }
+
+
+@router.post("/sync/gmail/incremental", tags=["gmail"])
+async def sync_gmail_incremental(
+    triage: bool = Query(True, description="Triage newly arrived emails"),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Delta sync via Gmail historyId. Bootstraps anchor on first run."""
+    return await _gmail_sync.sync_incremental(session, run_triage=triage)
+
+
+@router.post("/sync/icloud", tags=["icloud"])
+async def sync_icloud(
+    max_results: int = Query(50, le=500, description="Max messages to pull this run"),
+    triage: bool = Query(True),
+    force_full: bool = Query(False, description="Ignore last_sync_at, pull newest N"),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """
+    Incremental iCloud IMAP sync (SINCE last_sync_at). Requires
+    ICLOUD_USERNAME + ICLOUD_APP_PASSWORD in the environment.
+    """
+    if not settings.icloud_username or not settings.icloud_app_password:
+        raise HTTPException(
+            status_code=503,
+            detail="iCloud not configured (set ICLOUD_USERNAME + ICLOUD_APP_PASSWORD)",
+        )
+    return await _icloud_sync.sync(
+        session, max_results=max_results, run_triage=triage, force_full=force_full
+    )
+
+
+@router.get("/icloud/health", tags=["icloud"])
+async def icloud_health() -> dict:
+    """Verify iCloud IMAP connectivity (never raises)."""
+    if not settings.icloud_username or not settings.icloud_app_password:
+        return {"ok": False, "error": "iCloud not configured", "configured": False}
+    return ICloudConnector().health()
+
+
+@router.get("/sync/status", tags=["sync"])
+async def sync_status(session: AsyncSession = Depends(get_session)) -> dict:
+    """Per-account sync state + stored/untriaged counts (for backfill monitoring)."""
+    accounts = (await session.scalars(select(EmailAccount))).all()
+    total = await session.scalar(select(func.count(Email.id))) or 0
+    untriaged = (
+        await session.scalar(
+            select(func.count(Email.id))
+            .select_from(Email)
+            .outerjoin(Classification, Classification.email_id == Email.id)
+            .where(Classification.id.is_(None))
+        )
+        or 0
+    )
+    out = []
+    for a in accounts:
+        acc_total = await session.scalar(
+            select(func.count(Email.id)).where(Email.account_id == a.id)
+        )
+        out.append({
+            "provider": a.provider.value,
+            "mailbox": a.email_address,
+            "sync_status": a.sync_status,
+            "last_sync_at": a.last_sync_at.isoformat() if a.last_sync_at else None,
+            "last_history_id": a.last_history_id,
+            "emails": acc_total or 0,
+        })
+    return {"total_emails": total, "untriaged": untriaged, "accounts": out}
+
+
+async def _triage_pending_bg(limit: int) -> None:
+    async with AsyncSessionLocal() as session:
+        stmt = (
+            select(Email)
+            .outerjoin(Classification, Classification.email_id == Email.id)
+            .where(Classification.id.is_(None))
+            .order_by(Email.received_at.desc().nullslast())
+            .limit(limit)
+        )
+        emails = (await session.scalars(stmt)).all()
+        for email in emails:
+            try:
+                await _triage.triage_email(session, email, auto_actions=True)
+                await session.commit()
+            except Exception:  # noqa: BLE001
+                await session.rollback()
+
+
+@router.post("/triage/pending", tags=["sync"])
+async def triage_pending(
+    background: BackgroundTasks,
+    limit: int = Query(200, ge=1, le=2000, description="Max un-triaged emails to process"),
+    wait: bool = Query(False, description="Run synchronously (small batches only)"),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """
+    Triage backfilled emails that have no classification yet (newest first).
+    Use after a full backfill to classify historical mail in bounded batches.
+    """
+    if wait:
+        stmt = (
+            select(Email)
+            .outerjoin(Classification, Classification.email_id == Email.id)
+            .where(Classification.id.is_(None))
+            .order_by(Email.received_at.desc().nullslast())
+            .limit(limit)
+        )
+        emails = (await session.scalars(stmt)).all()
+        triaged = 0
+        for email in emails:
+            try:
+                await _triage.triage_email(session, email, auto_actions=True)
+                triaged += 1
+            except Exception:  # noqa: BLE001
+                pass
+        return {"triaged": triaged, "requested": len(emails)}
+    background.add_task(_triage_pending_bg, limit)
+    return {"status": "started", "limit": limit, "poll": "/api/inbox/sync/status"}

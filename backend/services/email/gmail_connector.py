@@ -17,12 +17,17 @@ from email.utils import parsedate_to_datetime
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
 from backend.config import settings
 
 logger = logging.getLogger("chatita_mail.gmail")
 
 _SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+
+
+class HistoryExpiredError(Exception):
+    """Raised when startHistoryId is too old (Gmail 404) → caller must full-resync."""
 
 
 @dataclass
@@ -185,6 +190,111 @@ class GmailConnector:
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Failed to parse message %s: %s", meta.get("id"), exc)
         return out
+
+    # ── Full-sync / incremental primitives ──────────────────────
+
+    def get_profile_history_id(self) -> str | None:
+        """Current mailbox historyId — used as the anchor for future deltas."""
+        try:
+            profile = self._get_service().users().getProfile(userId="me").execute()
+            hid = profile.get("historyId")
+            return str(hid) if hid is not None else None
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("get_profile_history_id failed: %s", exc)
+            return None
+
+    def list_message_ids(
+        self,
+        query: str | None = None,
+        label_ids: list[str] | None = None,
+        unread_only: bool = False,
+        max_total: int | None = None,
+        page_size: int = 500,
+    ) -> list[str]:
+        """
+        Paginate messages.list and collect message IDs (newest first).
+
+        Args:
+            query: Gmail search query (e.g. "in:inbox", "after:2024/01/01").
+            label_ids: restrict to labels (default INBOX). Pass [] for ALL mail.
+            max_total: stop after this many IDs (None = every message).
+            page_size: per-page cap (Gmail max 500).
+        """
+        svc = self._get_service()
+        if label_ids is None:
+            label_ids = ["INBOX"]
+        if unread_only:
+            label_ids = list(label_ids) + ["UNREAD"]
+
+        ids: list[str] = []
+        page_token: str | None = None
+        while True:
+            remaining = None if max_total is None else max_total - len(ids)
+            if remaining is not None and remaining <= 0:
+                break
+            this_page = page_size if remaining is None else min(page_size, remaining)
+            req = svc.users().messages().list(
+                userId="me",
+                labelIds=label_ids or None,
+                q=query,
+                maxResults=min(this_page, 500),
+                pageToken=page_token,
+            )
+            resp = req.execute()
+            ids.extend(m["id"] for m in resp.get("messages", []) if m.get("id"))
+            page_token = resp.get("nextPageToken")
+            if not page_token:
+                break
+        return ids if max_total is None else ids[:max_total]
+
+    def list_history_added(
+        self, start_history_id: str, label_id: str = "INBOX"
+    ) -> tuple[list[str], str | None]:
+        """
+        Return (added_message_ids, new_history_id) since start_history_id via
+        users.history.list (messageAdded). Raises HistoryExpiredError on 404.
+        """
+        svc = self._get_service()
+        added: list[str] = []
+        page_token: str | None = None
+        new_history_id: str | None = None
+        try:
+            while True:
+                resp = (
+                    svc.users()
+                    .history()
+                    .list(
+                        userId="me",
+                        startHistoryId=start_history_id,
+                        historyTypes=["messageAdded"],
+                        labelId=label_id or None,
+                        pageToken=page_token,
+                    )
+                    .execute()
+                )
+                if resp.get("historyId"):
+                    new_history_id = str(resp["historyId"])
+                for h in resp.get("history", []):
+                    for ma in h.get("messagesAdded", []) or []:
+                        msg = ma.get("message", {})
+                        mid = msg.get("id")
+                        if mid:
+                            added.append(mid)
+                page_token = resp.get("nextPageToken")
+                if not page_token:
+                    break
+        except HttpError as exc:
+            if getattr(exc, "resp", None) is not None and exc.resp.status == 404:
+                raise HistoryExpiredError(str(exc)) from exc
+            raise
+        # de-dup preserving order
+        seen: set[str] = set()
+        deduped = [m for m in added if not (m in seen or seen.add(m))]
+        return deduped, new_history_id
+
+    def fetch_normalized(self, message_id: str) -> NormalizedEmail:
+        """Public: fetch + parse a single message by id."""
+        return self._fetch_and_normalize(self._get_service(), message_id)
 
     def _fetch_and_normalize(self, svc, message_id: str) -> NormalizedEmail:
         msg = svc.users().messages().get(userId="me", id=message_id, format="full").execute()
