@@ -54,6 +54,7 @@ async def _run(max_total: int, batch: int) -> int:
 
     created = 0
     seen = 0
+    failed = 0
     async with AsyncSessionLocal() as session:
         account = await _get_or_create_account(
             session, conn.username, AccountProvider.ICLOUD
@@ -66,14 +67,24 @@ async def _run(max_total: int, batch: int) -> int:
                 chunk = seqs[off : off + batch]
                 nes = await asyncio.to_thread(conn.fetch_seqs, chunk)
                 for ne in nes:
-                    _, was_created = await _upsert_email(session, account, ne)
-                    created += int(was_created)
+                    # SAVEPOINT per email so a single bad row (e.g. an
+                    # unexpected oversized field) can't poison the whole batch.
+                    try:
+                        async with session.begin_nested():
+                            _, was_created = await _upsert_email(session, account, ne)
+                        created += int(was_created)
+                    except Exception as exc:  # noqa: BLE001
+                        failed += 1
+                        print(
+                            f"[icloud-backfill] skip {ne.provider_message_id[:40]}: {exc}",
+                            flush=True,
+                        )
                     seen += 1
                 await session.commit()
                 rate = seen / max(time.time() - started, 1e-6)
                 print(
                     f"[icloud-backfill] fetched={seen}/{want} created={created} "
-                    f"elapsed={time.time() - started:.0f}s rate={rate:.1f}/s",
+                    f"failed={failed} elapsed={time.time() - started:.0f}s rate={rate:.1f}/s",
                     flush=True,
                 )
         finally:
@@ -82,7 +93,7 @@ async def _run(max_total: int, batch: int) -> int:
             await session.commit()
 
     print(
-        f"[icloud-backfill] DONE fetched={seen} created={created} "
+        f"[icloud-backfill] DONE fetched={seen} created={created} failed={failed} "
         f"in {time.time() - started:.0f}s",
         flush=True,
     )

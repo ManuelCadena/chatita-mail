@@ -283,11 +283,27 @@ class ICloudConnector:
         if not message_id:
             message_id = f"icloud-uid-{uid.decode()}"
 
+        # thread_id: a SINGLE message-id that identifies the conversation root.
+        # NOTE: the raw `References` header is a whole chain of message-ids and
+        # can far exceed the VARCHAR(512) column, so we take only the first
+        # reference (thread root), else In-Reply-To, else this message's own id.
+        refs = (msg.get("References") or "").split()
+        in_reply_to = (msg.get("In-Reply-To") or "").strip()
+        thread_ref = (refs[0] if refs else "") or in_reply_to or message_id
+        thread_id = thread_ref.strip().strip("<>") or None
+
         snippet = body_text[:200] if body_text else (subject or "")[:200]
+
+        # Defensive caps to match DB column limits (avoid StringDataRightTruncation
+        # poisoning the whole batch transaction).
+        message_id = message_id[:512]
+        thread_id = thread_id[:512] if thread_id else None
+        from_email = (from_email or "")[:320]
+        from_name = from_name[:255] if from_name else None
 
         return NormalizedEmail(
             provider_message_id=message_id,
-            thread_id=msg.get("Thread-Topic") or msg.get("References") or None,
+            thread_id=thread_id,
             from_address=from_email,
             from_name=from_name,
             to_addresses=_split_addresses(to_raw),
