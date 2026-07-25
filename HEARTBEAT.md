@@ -14,8 +14,8 @@
 | **Motor AI** | AION Brain v3.2 vía **MCP** (ya publicado) |
 | **Repo** | https://github.com/ManuelCadena/chatita-mail |
 | **Autor** | Manuel Cadena |
-| **Última actualización** | 23-Jul-2026 13:56 (UTC-06:00) |
-| **Fase actual** | 🟢 **PROD + INGESTA ROBUSTA** — https://chatita.ai/mail/. Backfill Gmail completo (29,821 emails), incremental por historyId + systemd timer c/5min (auto-triage). iCloud connector wired (creds pendientes). Pendiente: triage histórico (29k untriaged), Fase 3 personalización |
+| **Última actualización** | 25-Jul-2026 16:11 (UTC-06:00) |
+| **Fase actual** | 🟢 **PROD + INGESTA COMPLETA + 100% TRIAGED** — https://chatita.ai/mail/. 40,275 emails (Gmail 30,157 + iCloud 10,118), **0 sin clasificar (100% triaged)**. Timers activos: `chatita-mail-sync.timer` (Gmail incremental c/5min) + `chatita-mail-icloud.timer` (iCloud SINCE c/10min), ambos finalizando OK. Backend HTTP 200 (uvicorn :8000). Categorías: MEDIUM 28,622 · NOISE 11,210 · SPAM 372 · IMPORTANT 37 · LOW 30 · CRITICAL 4. 33 tareas / 8 compromisos abiertos · 17,418 min ahorrados. Pendiente: Fase 3 personalización de estilo |
 | **Meta usuario** | ≤5 min/día en email · 100% importantes atendidos · 0% spam |
 
 ---
