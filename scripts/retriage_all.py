@@ -27,6 +27,7 @@ Stop:  pkill -f retriage_all.py     (safe: resumes from last checkpoint)
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import json
 import os
 import sys
@@ -50,6 +51,23 @@ CHECKPOINT = 50
 HERE = Path(__file__).resolve().parent
 IDS_FILE = HERE / "retriage_ids.txt"
 PROGRESS_FILE = HERE / "retriage_progress.json"
+LOCK_FILE = HERE / "retriage.lock"
+_lock_fh = None  # kept open for the process lifetime to hold the flock
+
+
+def _acquire_singleton_lock() -> bool:
+    """Exclusive non-blocking flock so at most ONE batch runs at a time.
+    Returns False (and the caller exits) if another instance already holds it.
+    """
+    global _lock_fh
+    _lock_fh = open(LOCK_FILE, "w")
+    try:
+        fcntl.flock(_lock_fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        _lock_fh.write(str(os.getpid()))
+        _lock_fh.flush()
+        return True
+    except BlockingIOError:
+        return False
 
 _classifier = EmailClassifier()
 _sem = asyncio.Semaphore(CONCURRENCY)
@@ -166,6 +184,9 @@ async def _retriage_one(email_id: str) -> None:
 
 
 async def main() -> None:
+    if not _acquire_singleton_lock():
+        print("[retriage] another instance is already running (lock held) -> exit", flush=True)
+        return
     ids = await _snapshot_ids()
     start = _load_index()
     total = len(ids)
