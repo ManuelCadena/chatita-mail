@@ -21,11 +21,22 @@ if pgrep -f retriage_all.py >/dev/null 2>&1; then
   exit 0
 fi
 
-# 2) Already finished? (checkpoint index >= total ids) -> stop watchdog work.
+# 2) Already finished? (checkpoint index >= total ids) -> notify once, stop.
+SENTINEL="$APP/scripts/retriage_notified"
 if [[ -f "$IDS" && -f "$PROG" ]]; then
   total=$(wc -l < "$IDS" | tr -d ' ')
   idx=$("$APP/venv/bin/python" -c "import json;print(json.load(open('$PROG')).get('index',0))" 2>/dev/null || echo 0)
   if [[ "${total:-0}" -gt 0 && "${idx:-0}" -ge "${total}" ]]; then
+    # SINGLE-FIRE guarantee: atomically CLAIM the sentinel BEFORE notifying,
+    # using noclobber (fails if it already exists). Whether the notification
+    # then succeeds or errors, we NEVER retry -> no possibility of a loop
+    # spamming identical messages. (Deliberately prioritizes no-loop over
+    # guaranteed delivery; delivery is verified working.)
+    if ( set -o noclobber; : > "$SENTINEL" ) 2>/dev/null; then
+      echo "[resume $(date -u +%FT%TZ)] DONE detected -> notifying once (sentinel claimed)" >> "$LOG"
+      PYTHONPATH="$APP" "$APP/venv/bin/python" "$APP/scripts/retriage_notify.py" >> "$LOG" 2>&1 \
+        || echo "[resume $(date -u +%FT%TZ)] notify failed (will NOT retry, sentinel held)" >> "$LOG"
+    fi
     exit 0
   fi
 fi
