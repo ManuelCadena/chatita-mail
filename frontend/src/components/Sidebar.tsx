@@ -1,4 +1,5 @@
 // Chatita Mail v3.0 — left navigation (folders, counts, sync, workload)
+import { useEffect, useRef } from "react";
 import * as Icons from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
@@ -58,6 +59,17 @@ export default function Sidebar() {
     },
     onError: (e: unknown) => toast.error(`Sync failed: ${(e as Error).message}`),
   });
+
+  // Auto-sync on open: fire an incremental sync once when the app mounts
+  // (i.e. when the user clicks/opens Mail) so the inbox is fresh immediately.
+  // Background systemd timers keep syncing every few minutes thereafter.
+  const autoSyncedRef = useRef(false);
+  useEffect(() => {
+    if (autoSyncedRef.current) return;
+    autoSyncedRef.current = true;
+    sync.mutate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <aside className="w-60 shrink-0 border-r border-slate-200 bg-slate-50 flex flex-col">
