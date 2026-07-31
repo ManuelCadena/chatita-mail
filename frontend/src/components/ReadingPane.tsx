@@ -17,7 +17,10 @@ import {
   ShieldAlert,
   FileText,
   Reply,
-  Copy,
+  ReplyAll,
+  Forward,
+  Send,
+  X,
   Loader2,
   Layers,
 } from "lucide-react";
@@ -27,18 +30,65 @@ import {
   getEmail,
   releaseFromQuarantine,
   setRead,
+  forwardEmail,
+  replyEmail,
   setStatus,
   similarEmails,
   summarizeEmail,
   unsubscribeEmail,
   updateTask,
   type EmailSummary,
-  type ReplyDraft,
 } from "../api/client";
 import { useUI } from "../store";
 import { CategoryBadge, SecurityBadge } from "./badges";
 import { avatarColor, deadlineLabel, fullDate, initials } from "../lib/format";
-import type { EmailListItem, EmailStatus } from "../types";
+import type { EmailDetail, EmailListItem, EmailStatus } from "../types";
+
+// ── Composer (reply / reply-all / forward) ──────────────────
+type ComposeMode = "reply" | "replyAll" | "forward";
+interface ComposeState {
+  mode: ComposeMode;
+  to: string;
+  cc: string;
+  subject: string;
+  body: string;
+  includeAttachments: boolean;
+}
+// Display-only: the mailbox the service account impersonates for sending.
+const MAILBOX = "jose@manuelcadena.com";
+const splitAddrs = (s: string) => s.split(",").map((x) => x.trim()).filter(Boolean);
+const reSubject = (p: "Re:" | "Fwd:", s: string | null) => {
+  const subj = (s || "").trim();
+  if (p === "Re:" && /^re:/i.test(subj)) return subj;
+  if (p === "Fwd:" && /^(fwd|fw):/i.test(subj)) return subj;
+  return `${p} ${subj}`.trim();
+};
+function emptyReplyState(data: EmailDetail | undefined, mode: ComposeMode = "reply"): ComposeState {
+  const cc =
+    mode === "replyAll" && data
+      ? [...(data.to_addresses || []), ...(data.cc_addresses || [])]
+          .filter((a) => a && a !== data.from_address)
+          .join(", ")
+      : "";
+  return {
+    mode,
+    to: data?.from_address ?? "",
+    cc,
+    subject: reSubject("Re:", data?.subject ?? null),
+    body: "",
+    includeAttachments: false,
+  };
+}
+function emptyForwardState(data: EmailDetail): ComposeState {
+  return {
+    mode: "forward",
+    to: "",
+    cc: "",
+    subject: reSubject("Fwd:", data.subject),
+    body: "",
+    includeAttachments: true,
+  };
+}
 
 // Force every link inside a rendered email body to open in a NEW browser tab.
 // The Mail app runs inside an iframe (chatita.ai/mail/). A default (same-frame)
@@ -107,9 +157,9 @@ export default function ReadingPane() {
 
   // Phase 2: composer state
   const [summary, setSummary] = useState<EmailSummary | null>(null);
-  const [draft, setDraft] = useState<ReplyDraft | null>(null);
   const [tone, setTone] = useState("professional");
   const [similar, setSimilar] = useState<EmailListItem[] | null>(null);
+  const [compose, setCompose] = useState<ComposeState | null>(null);
 
   const similarMut = useMutation({
     mutationFn: () => similarEmails(selectedEmailId as string, 8),
@@ -122,17 +172,57 @@ export default function ReadingPane() {
     onSuccess: (r) => setSummary(r),
     onError: (e: unknown) => toast.error((e as Error).message),
   });
+  // AI draft fills the open composer (opens a reply first if none is open).
   const draftMut = useMutation({
     mutationFn: () => draftReply(selectedEmailId as string, tone),
-    onSuccess: (r) => setDraft(r),
+    onSuccess: (r) =>
+      setCompose((prev) => {
+        const base = prev ?? emptyReplyState(data);
+        return { ...base, body: r.body, subject: base.subject || r.subject };
+      }),
     onError: (e: unknown) => toast.error((e as Error).message),
   });
 
-  // Clear AI summary/draft/similar when the selected email changes.
+  const sendMut = useMutation({
+    mutationFn: async () => {
+      if (!compose || !selectedEmailId) throw new Error("Nada para enviar");
+      const to = splitAddrs(compose.to);
+      const cc = splitAddrs(compose.cc);
+      if (compose.mode === "forward") {
+        return forwardEmail(selectedEmailId, {
+          to,
+          cc,
+          subject: compose.subject,
+          body: compose.body,
+          include_attachments: compose.includeAttachments,
+        });
+      }
+      return replyEmail(selectedEmailId, {
+        body: compose.body,
+        to,
+        cc,
+        subject: compose.subject,
+        reply_all: compose.mode === "replyAll",
+      });
+    },
+    onSuccess: (r) => {
+      toast.success(`Enviado${r.to?.length ? ` a ${r.to.join(", ")}` : ""}`);
+      setCompose(null);
+      refresh();
+    },
+    onError: (e: unknown) => toast.error((e as Error).message),
+  });
+
+  const openCompose = (mode: ComposeMode) => {
+    if (!data) return;
+    setCompose(mode === "forward" ? emptyForwardState(data) : emptyReplyState(data, mode));
+  };
+
+  // Clear AI summary/composer/similar when the selected email changes.
   useEffect(() => {
     setSummary(null);
-    setDraft(null);
     setSimilar(null);
+    setCompose(null);
   }, [selectedEmailId]);
 
   // Open any clicked in-email link OUTSIDE the Mail iframe so external sites
@@ -221,17 +311,15 @@ export default function ReadingPane() {
           disabled={extractMut.isPending}
         />
         <div className="mx-1 h-5 w-px bg-slate-200" />
+        <ToolbarBtn icon={<Reply size={16} />} label="Responder" onClick={() => openCompose("reply")} />
+        <ToolbarBtn icon={<ReplyAll size={16} />} label="Resp. todos" onClick={() => openCompose("replyAll")} />
+        <ToolbarBtn icon={<Forward size={16} />} label="Reenviar" onClick={() => openCompose("forward")} />
+        <div className="mx-1 h-5 w-px bg-slate-200" />
         <ToolbarBtn
           icon={summarizeMut.isPending ? <Loader2 size={16} className="animate-spin" /> : <FileText size={16} />}
           label={summarizeMut.isPending ? "Summarizing…" : "Summarize"}
           onClick={() => summarizeMut.mutate()}
           disabled={summarizeMut.isPending}
-        />
-        <ToolbarBtn
-          icon={draftMut.isPending ? <Loader2 size={16} className="animate-spin" /> : <Reply size={16} />}
-          label={draftMut.isPending ? "Drafting…" : "Draft reply"}
-          onClick={() => draftMut.mutate()}
-          disabled={draftMut.isPending}
         />
         <ToolbarBtn
           icon={similarMut.isPending ? <Loader2 size={16} className="animate-spin" /> : <Layers size={16} />}
@@ -436,59 +524,123 @@ export default function ReadingPane() {
           </Panel>
         )}
 
-        {/* Reply composer (Phase 2) */}
-        {draft && (
+        {/* Composer: reply / reply-all / forward (sends via gmail.send) */}
+        {compose && (
           <div className="mt-6 rounded-xl border border-indigo-200 bg-indigo-50/50 p-4">
-            <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-indigo-600">
-                <Reply size={14} /> Draft reply
-                {draft.source === "fallback" && (
-                  <span className="text-slate-400 normal-case">(fallback)</span>
+                {compose.mode === "forward" ? (
+                  <Forward size={14} />
+                ) : compose.mode === "replyAll" ? (
+                  <ReplyAll size={14} />
+                ) : (
+                  <Reply size={14} />
                 )}
+                {compose.mode === "forward"
+                  ? "Reenviar"
+                  : compose.mode === "replyAll"
+                  ? "Responder a todos"
+                  : "Responder"}
               </div>
-              <div className="flex items-center gap-1.5">
-                <select
-                  value={tone}
-                  onChange={(e) => setTone(e.target.value)}
-                  className="text-xs rounded-md border border-slate-200 bg-white px-2 py-1"
-                >
-                  {["professional", "friendly", "brief", "formal", "warm"].map((t) => (
-                    <option key={t} value={t}>{t}</option>
-                  ))}
-                </select>
-                <button
-                  onClick={() => draftMut.mutate()}
-                  disabled={draftMut.isPending}
-                  className="text-xs rounded-md border border-slate-200 bg-white px-2 py-1 hover:bg-slate-50 disabled:opacity-50"
-                >
-                  {draftMut.isPending ? "…" : "Regenerate"}
-                </button>
-              </div>
+              <button
+                onClick={() => setCompose(null)}
+                title="Cerrar"
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X size={16} />
+              </button>
             </div>
+
+            <label className="block text-[11px] font-medium text-slate-500 mb-0.5">Para</label>
             <input
-              value={draft.subject}
-              onChange={(e) => setDraft({ ...draft, subject: e.target.value })}
+              value={compose.to}
+              onChange={(e) => setCompose({ ...compose, to: e.target.value })}
+              placeholder="correo@dominio.com, otro@dominio.com"
+              className="w-full mb-2 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-sm"
+            />
+
+            <label className="block text-[11px] font-medium text-slate-500 mb-0.5">CC</label>
+            <input
+              value={compose.cc}
+              onChange={(e) => setCompose({ ...compose, cc: e.target.value })}
+              placeholder="(opcional)"
+              className="w-full mb-2 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-sm"
+            />
+
+            <input
+              value={compose.subject}
+              onChange={(e) => setCompose({ ...compose, subject: e.target.value })}
               className="w-full mb-2 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-sm font-medium"
             />
+
             <textarea
-              value={draft.body}
-              onChange={(e) => setDraft({ ...draft, body: e.target.value })}
-              rows={8}
+              value={compose.body}
+              onChange={(e) => setCompose({ ...compose, body: e.target.value })}
+              rows={9}
+              placeholder="Escribe tu mensaje…"
               className="w-full rounded-md border border-slate-200 bg-white px-2.5 py-2 text-sm leading-relaxed resize-y"
             />
-            <div className="mt-2 flex items-center gap-2">
+
+            {compose.mode === "forward" && (
+              <label className="mt-2 flex items-center gap-2 text-xs text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={compose.includeAttachments}
+                  onChange={(e) => setCompose({ ...compose, includeAttachments: e.target.checked })}
+                />
+                Incluir adjuntos originales
+                {data.attachments?.length ? ` (${data.attachments.length})` : ""}
+              </label>
+            )}
+
+            <div className="mt-3 flex items-center gap-2 flex-wrap">
               <button
                 onClick={() => {
-                  navigator.clipboard.writeText(draft.body);
-                  toast.success("Reply copied");
+                  const dest = compose.to || "(sin destinatario)";
+                  if (
+                    window.confirm(
+                      `Se enviará como ${MAILBOX}\n\nPara: ${dest}\nAsunto: ${compose.subject}\n\n¿Enviar ahora?`
+                    )
+                  ) {
+                    sendMut.mutate();
+                  }
                 }}
-                className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 text-white text-xs px-3 py-1.5 hover:bg-slate-700"
+                disabled={sendMut.isPending || !compose.to.trim()}
+                className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 text-white text-xs px-3 py-1.5 hover:bg-indigo-500 disabled:opacity-50"
               >
-                <Copy size={14} /> Copy reply
+                {sendMut.isPending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                {sendMut.isPending ? "Enviando…" : "Enviar"}
               </button>
-              <span className="text-[11px] text-slate-400">
-                Editable draft · sending not enabled yet (read-only scope)
-              </span>
+
+              {compose.mode !== "forward" && (
+                <>
+                  <select
+                    value={tone}
+                    onChange={(e) => setTone(e.target.value)}
+                    className="text-xs rounded-md border border-slate-200 bg-white px-2 py-1.5"
+                  >
+                    {["professional", "friendly", "brief", "formal", "warm"].map((t) => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={() => draftMut.mutate()}
+                    disabled={draftMut.isPending}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-indigo-200 bg-white text-indigo-600 text-xs px-3 py-1.5 hover:bg-indigo-50 disabled:opacity-50"
+                  >
+                    {draftMut.isPending ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                    {draftMut.isPending ? "Generando…" : "Generar con IA"}
+                  </button>
+                </>
+              )}
+
+              <button
+                onClick={() => setCompose(null)}
+                className="text-xs rounded-md border border-slate-200 bg-white px-3 py-1.5 text-slate-600 hover:bg-slate-50"
+              >
+                Cancelar
+              </button>
+              <span className="text-[11px] text-slate-400">Envía como {MAILBOX}</span>
             </div>
           </div>
         )}

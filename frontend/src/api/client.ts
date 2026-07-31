@@ -173,4 +173,42 @@ export async function draftReply(
   return data;
 }
 
+// ── Send (reply / reply-all / forward / new) — gmail.send ──
+export interface SendResult {
+  sent: boolean;
+  id?: string;
+  threadId?: string;
+  to?: string[];
+  cc?: string[];
+  subject?: string;
+  attachments?: number;
+}
+
+export async function replyEmail(
+  id: string,
+  payload: { body: string; to?: string[]; cc?: string[]; subject?: string; reply_all?: boolean }
+): Promise<SendResult> {
+  const { data } = await api.post<SendResult>(`/inbox/emails/${id}/reply`, payload);
+  return data;
+}
+
+export async function forwardEmail(
+  id: string,
+  payload: { to: string[]; body?: string; cc?: string[]; subject?: string; include_attachments?: boolean }
+): Promise<SendResult> {
+  const { data } = await api.post<SendResult>(`/inbox/emails/${id}/forward`, payload);
+  return data;
+}
+
+export async function composeEmail(payload: {
+  to: string[];
+  subject: string;
+  body: string;
+  cc?: string[];
+  bcc?: string[];
+}): Promise<SendResult> {
+  const { data } = await api.post<SendResult>("/inbox/compose", payload);
+  return data;
+}
+
 export default api;

@@ -5,7 +5,9 @@ Reuses Chatita's existing Google Service Account with Domain-Wide Delegation
 (same mechanism as chatita-local/tools/google-service-auth.js). No per-user OAuth
 flow is required: the service account impersonates the target mailbox.
 
-Scope: gmail.readonly (Phase 1 only reads; sending/modify added later).
+Scopes: gmail.readonly (read/sync) + gmail.send (reply/forward/compose). The
+same service account already has gmail.send authorized via Domain-Wide
+Delegation (chatita-local/tools/hub-gmail.js uses it in production).
 """
 from __future__ import annotations
 
@@ -13,6 +15,10 @@ import base64
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from email.mime.base import MIMEBase
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email import encoders
 from email.utils import parsedate_to_datetime
 
 from google.oauth2 import service_account
@@ -23,7 +29,10 @@ from backend.config import settings
 
 logger = logging.getLogger("chatita_mail.gmail")
 
-_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+_SCOPES = [
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.send",
+]
 
 
 class HistoryExpiredError(Exception):
@@ -295,6 +304,109 @@ class GmailConnector:
     def fetch_normalized(self, message_id: str) -> NormalizedEmail:
         """Public: fetch + parse a single message by id."""
         return self._fetch_and_normalize(self._get_service(), message_id)
+
+    # ── Send / compose primitives (gmail.send) ──────────────────
+
+    def get_headers(self, message_id: str) -> dict:
+        """Fetch RFC822 threading headers of a message (for proper reply chains)."""
+        svc = self._get_service()
+        msg = (
+            svc.users()
+            .messages()
+            .get(
+                userId="me",
+                id=message_id,
+                format="metadata",
+                metadataHeaders=["Message-ID", "References", "Subject", "From", "To", "Cc"],
+            )
+            .execute()
+        )
+        headers = (msg.get("payload") or {}).get("headers", [])
+        return {
+            "message_id": _header(headers, "Message-ID"),
+            "references": _header(headers, "References"),
+            "subject": _header(headers, "Subject"),
+            "from": _header(headers, "From"),
+            "to": _header(headers, "To"),
+            "cc": _header(headers, "Cc"),
+            "thread_id": msg.get("threadId"),
+        }
+
+    def get_attachment_bytes(self, message_id: str, attachment_id: str) -> bytes:
+        """Download raw bytes of one attachment (used when forwarding)."""
+        svc = self._get_service()
+        att = (
+            svc.users()
+            .messages()
+            .attachments()
+            .get(userId="me", messageId=message_id, id=attachment_id)
+            .execute()
+        )
+        data = att.get("data", "")
+        padded = data + "=" * (-len(data) % 4)
+        return base64.urlsafe_b64decode(padded)
+
+    def send_message(
+        self,
+        *,
+        to: list[str],
+        subject: str,
+        body_text: str,
+        cc: list[str] | None = None,
+        bcc: list[str] | None = None,
+        thread_id: str | None = None,
+        in_reply_to: str | None = None,
+        references: str | None = None,
+        attachments: list[dict] | None = None,
+    ) -> dict:
+        """
+        Send an email as the impersonated mailbox. Returns {id, threadId}.
+
+        attachments: list of {filename, mime_type, data(bytes)}.
+        Threading: pass thread_id (Gmail) + in_reply_to/references (RFC Message-ID)
+        so replies chain correctly in every client.
+        """
+        to = [a for a in (to or []) if a]
+        if not to:
+            raise ValueError("send_message requires at least one recipient")
+
+        if attachments:
+            msg: MIMEText | MIMEMultipart = MIMEMultipart("mixed")
+            msg.attach(MIMEText(body_text or "", "plain", "utf-8"))
+            for att in attachments:
+                part = MIMEBase(*(att.get("mime_type") or "application/octet-stream").split("/", 1))
+                part.set_payload(att.get("data") or b"")
+                encoders.encode_base64(part)
+                part.add_header(
+                    "Content-Disposition",
+                    "attachment",
+                    filename=att.get("filename") or "attachment",
+                )
+                msg.attach(part)
+        else:
+            msg = MIMEText(body_text or "", "plain", "utf-8")
+
+        msg["To"] = ", ".join(to)
+        if cc:
+            msg["Cc"] = ", ".join([a for a in cc if a])
+        if bcc:
+            msg["Bcc"] = ", ".join([a for a in bcc if a])
+        msg["From"] = self.subject
+        msg["Subject"] = subject or ""
+        if in_reply_to:
+            msg["In-Reply-To"] = in_reply_to
+            msg["References"] = (f"{references} {in_reply_to}".strip() if references else in_reply_to)
+
+        raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+        body: dict = {"raw": raw}
+        if thread_id:
+            body["threadId"] = thread_id
+        sent = self._get_service().users().messages().send(userId="me", body=body).execute()
+        logger.info(
+            "Gmail send ok: to=%s subject=%r thread=%s msg=%s",
+            to, (subject or "")[:80], sent.get("threadId"), sent.get("id"),
+        )
+        return {"id": sent.get("id"), "threadId": sent.get("threadId")}
 
     def _fetch_and_normalize(self, svc, message_id: str) -> NormalizedEmail:
         msg = svc.users().messages().get(userId="me", id=message_id, format="full").execute()
