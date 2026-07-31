@@ -40,7 +40,7 @@ const GROUPS: { id: FolderDef["group"]; label: string | null }[] = [
 ];
 
 export default function Sidebar() {
-  const { folderKey, setFolder } = useUI();
+  const { folderKey, setFolder, openCompose } = useUI();
   const qc = useQueryClient();
 
   const { data: stats } = useQuery({
@@ -84,8 +84,15 @@ export default function Sidebar() {
         </div>
       </div>
 
-      {/* Sync */}
-      <div className="px-3">
+      {/* Compose + Sync */}
+      <div className="px-3 space-y-2">
+        <button
+          onClick={openCompose}
+          className="w-full flex items-center justify-center gap-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold py-2 hover:bg-indigo-500 transition"
+        >
+          <LucideIcon name="PenSquare" />
+          Redactar
+        </button>
         <button
           onClick={() => sync.mutate()}
           disabled={sync.isPending}

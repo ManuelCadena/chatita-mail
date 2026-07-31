@@ -52,6 +52,7 @@ class EmailStatus(str, enum.Enum):
     QUARANTINED = "QUARANTINED"
     BLOCKED = "BLOCKED"
     DELETED = "DELETED"
+    SENT = "SENT"  # outbound mail persisted after a successful gmail.send
 
 
 class RiskLevel(str, enum.Enum):

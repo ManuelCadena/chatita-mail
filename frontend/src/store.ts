@@ -23,6 +23,7 @@ export const FOLDERS: FolderDef[] = [
   { key: "medium", label: "Medium", icon: "Circle", status: "INBOX", category: "MEDIUM", group: "categories", countSource: "category", countKey: "MEDIUM" },
   { key: "low", label: "Low", icon: "Minus", status: "INBOX", category: "LOW", group: "categories", countSource: "category", countKey: "LOW" },
 
+  { key: "sent", label: "Enviados", icon: "Send", status: "SENT", group: "system", countSource: "status", countKey: "SENT" },
   { key: "archived", label: "Archived", icon: "Archive", status: "ARCHIVED", group: "system", countSource: "status", countKey: "ARCHIVED" },
   { key: "spam", label: "Spam", icon: "Ban", category: "SPAM", group: "system", countSource: "category", countKey: "SPAM" },
   { key: "noise", label: "Noise", icon: "VolumeX", category: "NOISE", group: "system", countSource: "category", countKey: "NOISE" },
@@ -37,12 +38,15 @@ interface UIState {
   searchMode: "text" | "meaning";
   unreadOnly: boolean;
   sortMode: "priority" | "date";
+  composeOpen: boolean;
   setFolder: (key: string) => void;
   selectEmail: (id: string | null) => void;
   setSearch: (q: string) => void;
   setSearchMode: (mode: "text" | "meaning") => void;
   toggleUnreadOnly: () => void;
   setSortMode: (mode: "priority" | "date") => void;
+  openCompose: () => void;
+  closeCompose: () => void;
 }
 
 export const useUI = create<UIState>((set) => ({
@@ -53,12 +57,15 @@ export const useUI = create<UIState>((set) => ({
   unreadOnly: false,
   // Default to importance-first so the most urgent mail always surfaces on top.
   sortMode: "priority",
+  composeOpen: false,
   setFolder: (key) => set({ folderKey: key, selectedEmailId: null }),
   selectEmail: (id) => set({ selectedEmailId: id }),
   setSearch: (q) => set({ search: q }),
   setSearchMode: (mode) => set({ searchMode: mode }),
   toggleUnreadOnly: () => set((s) => ({ unreadOnly: !s.unreadOnly })),
   setSortMode: (mode) => set({ sortMode: mode }),
+  openCompose: () => set({ composeOpen: true }),
+  closeCompose: () => set({ composeOpen: false }),
 }));
 
 export function folderByKey(key: string): FolderDef {

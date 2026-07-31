@@ -14,7 +14,8 @@ export type EmailStatus =
   | "ARCHIVED"
   | "QUARANTINED"
   | "BLOCKED"
-  | "DELETED";
+  | "DELETED"
+  | "SENT";
 
 export type RiskLevel = "safe" | "suspicious" | "dangerous";
 

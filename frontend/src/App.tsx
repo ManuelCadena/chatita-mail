@@ -4,6 +4,7 @@ import Sidebar from "./components/Sidebar";
 import EmailList from "./components/EmailList";
 import ReadingPane from "./components/ReadingPane";
 import TasksView from "./components/TasksView";
+import ComposeModal from "./components/ComposeModal";
 import { useUI } from "./store";
 
 export default function App() {
@@ -14,6 +15,7 @@ export default function App() {
 
   return (
     <div className="h-screen flex bg-slate-100 text-slate-900">
+      <ComposeModal />
       <Sidebar />
 
       <div className="flex-1 flex flex-col min-w-0">

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -21,13 +22,49 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.config import settings
 from backend.models.db import get_session
-from backend.models.entities import Email
+from backend.models.entities import Email, EmailStatus
+from backend.routes.inbox import _get_or_create_account
 from backend.services.email.gmail_connector import GmailConnector
 
 log = logging.getLogger("chatita_mail.compose")
 router = APIRouter(prefix="/api", tags=["compose"])
 
 _gmail = GmailConnector()
+
+
+async def _persist_sent(
+    session: AsyncSession,
+    *,
+    result: dict,
+    to: list[str],
+    cc: list[str] | None,
+    subject: str,
+    body: str,
+    thread_id: str | None = None,
+) -> None:
+    """Store a copy of an outbound message (status=SENT). Never fails the send."""
+    try:
+        account = await _get_or_create_account(session, settings.gmail_impersonate_subject)
+        session.add(
+            Email(
+                account_id=account.id,
+                provider_message_id=result.get("id") or f"sent-{datetime.now(timezone.utc).timestamp()}",
+                thread_id=result.get("threadId") or thread_id,
+                from_address=settings.gmail_impersonate_subject,
+                from_name="Me",
+                to_addresses=to,
+                cc_addresses=cc or None,
+                subject=subject,
+                body_text=body,
+                snippet=(body or "")[:200],
+                status=EmailStatus.SENT,
+                is_read=True,
+                received_at=datetime.now(timezone.utc),
+            )
+        )
+        await session.flush()
+    except Exception as exc:  # noqa: BLE001
+        log.warning("persist SENT failed (mail already sent): %s", exc)
 
 
 # ── request bodies ──────────────────────────────────────────
@@ -129,7 +166,11 @@ async def reply_email(
 
     if not email.is_read:
         email.is_read = True
-        await session.flush()
+    await _persist_sent(
+        session, result=result, to=to, cc=cc, subject=subject,
+        body=payload.body, thread_id=email.thread_id,
+    )
+    await session.flush()
     return {"sent": True, "to": to, "cc": cc, "subject": subject, **result}
 
 
@@ -184,6 +225,10 @@ async def forward_email(
         )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Send failed: {exc}")
+    await _persist_sent(
+        session, result=result, to=payload.to, cc=payload.cc,
+        subject=subject, body=quoted, thread_id=result.get("threadId"),
+    )
     return {"sent": True, "to": payload.to, "subject": subject, "attachments": len(attachments), **result}
 
 
@@ -205,4 +250,8 @@ async def compose_email(
         )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Send failed: {exc}")
+    await _persist_sent(
+        session, result=result, to=payload.to, cc=payload.cc,
+        subject=payload.subject, body=payload.body,
+    )
     return {"sent": True, "to": payload.to, "subject": payload.subject, **result}
