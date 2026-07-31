@@ -19,6 +19,7 @@ import {
   Reply,
   Copy,
   Loader2,
+  Layers,
 } from "lucide-react";
 import {
   draftReply,
@@ -27,6 +28,7 @@ import {
   releaseFromQuarantine,
   setRead,
   setStatus,
+  similarEmails,
   summarizeEmail,
   unsubscribeEmail,
   updateTask,
@@ -36,7 +38,7 @@ import {
 import { useUI } from "../store";
 import { CategoryBadge, SecurityBadge } from "./badges";
 import { avatarColor, deadlineLabel, fullDate, initials } from "../lib/format";
-import type { EmailStatus } from "../types";
+import type { EmailListItem, EmailStatus } from "../types";
 
 // Force every link inside a rendered email body to open in a NEW browser tab.
 // The Mail app runs inside an iframe (chatita.ai/mail/). A default (same-frame)
@@ -107,6 +109,13 @@ export default function ReadingPane() {
   const [summary, setSummary] = useState<EmailSummary | null>(null);
   const [draft, setDraft] = useState<ReplyDraft | null>(null);
   const [tone, setTone] = useState("professional");
+  const [similar, setSimilar] = useState<EmailListItem[] | null>(null);
+
+  const similarMut = useMutation({
+    mutationFn: () => similarEmails(selectedEmailId as string, 8),
+    onSuccess: (r) => setSimilar(r),
+    onError: (e: unknown) => toast.error((e as Error).message),
+  });
 
   const summarizeMut = useMutation({
     mutationFn: () => summarizeEmail(selectedEmailId as string),
@@ -119,10 +128,11 @@ export default function ReadingPane() {
     onError: (e: unknown) => toast.error((e as Error).message),
   });
 
-  // Clear AI summary/draft when the selected email changes.
+  // Clear AI summary/draft/similar when the selected email changes.
   useEffect(() => {
     setSummary(null);
     setDraft(null);
+    setSimilar(null);
   }, [selectedEmailId]);
 
   // Open any clicked in-email link OUTSIDE the Mail iframe so external sites
@@ -222,6 +232,12 @@ export default function ReadingPane() {
           label={draftMut.isPending ? "Drafting…" : "Draft reply"}
           onClick={() => draftMut.mutate()}
           disabled={draftMut.isPending}
+        />
+        <ToolbarBtn
+          icon={similarMut.isPending ? <Loader2 size={16} className="animate-spin" /> : <Layers size={16} />}
+          label={similarMut.isPending ? "Buscando…" : "Similares"}
+          onClick={() => similarMut.mutate()}
+          disabled={similarMut.isPending}
         />
       </div>
 
@@ -382,6 +398,42 @@ export default function ReadingPane() {
           <div className="whitespace-pre-wrap text-sm text-slate-800 leading-relaxed">
             {data.body_text || "(empty body)"}
           </div>
+        )}
+
+        {/* Similar emails (semantic) */}
+        {similar && (
+          <Panel icon={<Layers size={14} />} tone="slate" title={`Emails similares (${similar.length})`}>
+            {similar.length === 0 ? (
+              <p className="text-sm text-slate-500">
+                Sin similares aún (este correo o los relacionados pueden no estar indexados todavía).
+              </p>
+            ) : (
+              <ul className="space-y-1">
+                {similar.map((s) => (
+                  <li key={s.id}>
+                    <button
+                      onClick={() => selectEmail(s.id)}
+                      className="w-full text-left flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-white transition"
+                    >
+                      {typeof s.similarity === "number" && (
+                        <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full border border-indigo-200 bg-indigo-50 text-indigo-600">
+                          {Math.round(s.similarity * 100)}%
+                        </span>
+                      )}
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm text-slate-800">
+                          {s.subject || "(no subject)"}
+                        </span>
+                        <span className="block truncate text-xs text-slate-400">
+                          {s.from_name || s.from_address}
+                        </span>
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Panel>
         )}
 
         {/* Reply composer (Phase 2) */}
