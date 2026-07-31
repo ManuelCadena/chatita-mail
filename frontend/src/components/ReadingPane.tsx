@@ -125,30 +125,45 @@ export default function ReadingPane() {
     setDraft(null);
   }, [selectedEmailId]);
 
-  // Open any clicked in-email link in a SEPARATE browser WINDOW (not a tab).
-  // Passing explicit width/height + "popup" makes the browser spawn a distinct
-  // window, so the external page renders on its own and Mail stays open in the
-  // background for the user to return to. (target=_blank alone opens a tab.)
+  // Open any clicked in-email link OUTSIDE the Mail iframe so external sites
+  // (which refuse framing via X-Frame-Options) never render the grey
+  // "This content is blocked" screen.
+  //   1. Try a SEPARATE browser window (popup with dimensions).
+  //   2. If the popup blocker nixes it (common inside an embedded iframe),
+  //      fall back to a new top-level TAB via the native anchor (target=_blank),
+  //      which browsers do NOT popup-block — so a link ALWAYS opens somewhere
+  //      and Mail stays intact for the user to return to.
   const openLinkInWindow = (e: React.MouseEvent<HTMLDivElement>) => {
     const anchor = (e.target as HTMLElement).closest("a");
     const href = anchor?.getAttribute("href");
     if (!href || !/^https?:\/\//i.test(href)) return; // ignore anchors/mailto/etc.
-    e.preventDefault();
     const w = Math.min(1280, Math.round(window.screen.availWidth * 0.8));
     const h = Math.min(900, Math.round(window.screen.availHeight * 0.85));
     const left = Math.round((window.screen.availWidth - w) / 2);
     const top = Math.round((window.screen.availHeight - h) / 2);
-    window.open(
-      href,
-      "_blank",
-      `popup=yes,noopener,noreferrer,width=${w},height=${h},left=${left},top=${top}`
-    );
+    let win: Window | null = null;
+    try {
+      win = window.open(
+        href,
+        "_blank",
+        `popup=yes,width=${w},height=${h},left=${left},top=${top}`
+      );
+    } catch {
+      win = null;
+    }
+    if (win) {
+      // Popup allowed → separate window. Sever opener for security and stop the
+      // native navigation so the link does NOT also load inside the iframe.
+      try { win.opener = null; } catch { /* cross-origin, ignore */ }
+      e.preventDefault();
+    }
+    // else: popup blocked → let the native target=_blank anchor open a new tab.
   };
 
   const sanitized = useMemo(() => {
     if (!data?.body_html) return null;
     return DOMPurify.sanitize(data.body_html, {
-      FORBID_TAGS: ["script", "style", "iframe", "form", "input", "object", "embed"],
+      FORBID_TAGS: ["script", "style", "iframe", "form", "input", "object", "embed", "base"],
       FORBID_ATTR: ["onerror", "onload", "onclick"],
       ADD_ATTR: ["target"],
     });
