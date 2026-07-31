@@ -34,11 +34,13 @@ interface UIState {
   folderKey: string;
   selectedEmailId: string | null;
   search: string;
+  searchMode: "text" | "meaning";
   unreadOnly: boolean;
   sortMode: "priority" | "date";
   setFolder: (key: string) => void;
   selectEmail: (id: string | null) => void;
   setSearch: (q: string) => void;
+  setSearchMode: (mode: "text" | "meaning") => void;
   toggleUnreadOnly: () => void;
   setSortMode: (mode: "priority" | "date") => void;
 }
@@ -47,12 +49,14 @@ export const useUI = create<UIState>((set) => ({
   folderKey: "inbox",
   selectedEmailId: null,
   search: "",
+  searchMode: "text",
   unreadOnly: false,
   // Default to importance-first so the most urgent mail always surfaces on top.
   sortMode: "priority",
   setFolder: (key) => set({ folderKey: key, selectedEmailId: null }),
   selectEmail: (id) => set({ selectedEmailId: id }),
   setSearch: (q) => set({ search: q }),
+  setSearchMode: (mode) => set({ searchMode: mode }),
   toggleUnreadOnly: () => set((s) => ({ unreadOnly: !s.unreadOnly })),
   setSortMode: (mode) => set({ sortMode: mode }),
 }));

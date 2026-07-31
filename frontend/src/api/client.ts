@@ -37,6 +37,25 @@ export async function getEmail(id: string): Promise<EmailDetail> {
   return data;
 }
 
+// Semantic search (BGE-M3 embeddings + pgvector cosine). status "ALL" searches
+// every folder; pass a specific EmailStatus to scope it.
+export async function searchSemantic(params: {
+  q: string;
+  status?: EmailStatus | "ALL";
+  limit?: number;
+}): Promise<EmailListItem[]> {
+  const { data } = await api.get<EmailListItem[]>("/inbox/search/semantic", { params });
+  return data;
+}
+
+// Emails semantically similar to a given one ("find related").
+export async function similarEmails(id: string, limit = 10): Promise<EmailListItem[]> {
+  const { data } = await api.get<EmailListItem[]>(`/inbox/emails/${id}/similar`, {
+    params: { limit },
+  });
+  return data;
+}
+
 export async function getStats(): Promise<InboxStats> {
   const { data } = await api.get<InboxStats>("/inbox/stats");
   return data;

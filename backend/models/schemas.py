@@ -50,6 +50,12 @@ class EmailOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class SemanticHit(EmailOut):
+    """An email returned by semantic search, with its cosine similarity (0-1)."""
+
+    similarity: float = 0.0
+
+
 # ── Actions ─────────────────────────────────────────────────
 class StatusUpdateIn(BaseModel):
     status: EmailStatus

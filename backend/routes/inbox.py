@@ -28,8 +28,14 @@ from backend.models.schemas import (
     EmailOut,
     InboxStats,
     ReadUpdateIn,
+    SemanticHit,
     StatusUpdateIn,
     TaskOut,
+)
+from backend.services.embeddings import (
+    EmbeddingError,
+    build_email_text,
+    embedder,
 )
 from backend.services.email.gmail_connector import GmailConnector
 from backend.services.email.icloud_connector import ICloudConnector
@@ -189,6 +195,92 @@ async def list_emails(
             item.risk_score = e.security_event.risk_score
         out.append(item)
     return out
+
+
+async def _hydrate_hits(
+    session: AsyncSession,
+    id_to_sim: dict[str, float],
+    status: EmailStatus | None,
+    limit: int,
+) -> list[SemanticHit]:
+    """Load emails by id, attach classification/security + similarity, sort desc."""
+    if not id_to_sim:
+        return []
+    stmt = (
+        select(Email)
+        .options(selectinload(Email.classification), selectinload(Email.security_event))
+        .where(Email.id.in_(list(id_to_sim.keys())))
+    )
+    if status:
+        stmt = stmt.where(Email.status == status)
+    emails = list((await session.scalars(stmt)).all())
+    hits: list[SemanticHit] = []
+    for e in emails:
+        item = SemanticHit.model_validate(e)
+        item.has_html = bool(e.body_html)
+        item.has_attachments = bool(e.attachments)
+        if e.classification:
+            item.category = e.classification.category
+            item.confidence = e.classification.confidence
+            item.is_newsletter = e.classification.is_newsletter
+            item.unsubscribe_url = e.classification.unsubscribe_url
+        if e.security_event:
+            item.risk_level = e.security_event.risk_level
+            item.risk_score = e.security_event.risk_score
+        item.similarity = round(id_to_sim.get(e.id, 0.0), 4)
+        hits.append(item)
+    hits.sort(key=lambda h: h.similarity, reverse=True)
+    return hits[:limit]
+
+
+@router.get("/search/semantic", response_model=list[SemanticHit])
+async def semantic_search(
+    q: str = Query(..., min_length=2, description="Natural-language query"),
+    status: str | None = Query("INBOX", description="Status filter; empty or 'ALL' = search everywhere"),
+    limit: int = Query(25, le=100),
+    session: AsyncSession = Depends(get_session),
+) -> list[SemanticHit]:
+    """Search emails by meaning (BGE-M3 embeddings + pgvector cosine)."""
+    # Parse the optional status filter (empty string or 'ALL' -> no filter).
+    status_filter: EmailStatus | None = None
+    if status and status.upper() != "ALL":
+        try:
+            status_filter = EmailStatus(status)
+        except ValueError:
+            raise HTTPException(status_code=422, detail=f"Invalid status: {status}")
+    try:
+        qvec = await embedder.embed_text(q)
+    except EmbeddingError as exc:
+        raise HTTPException(status_code=503, detail=f"Embeddings unavailable: {exc}")
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Embedding provider error: {exc}")
+    # Overfetch (status filter is applied after the vector search) then trim.
+    hits = await embedder.semantic_search(session, qvec, limit=limit * 3)
+    return await _hydrate_hits(session, dict(hits), status_filter, limit)
+
+
+@router.get("/emails/{email_id}/similar", response_model=list[SemanticHit])
+async def similar_emails(
+    email_id: str,
+    limit: int = Query(10, le=50),
+    session: AsyncSession = Depends(get_session),
+) -> list[SemanticHit]:
+    """Find emails semantically similar to a given one."""
+    vec = await embedder.get_email_vector(session, email_id)
+    if vec is None:
+        email = await session.get(Email, email_id)
+        if email is None:
+            raise HTTPException(status_code=404, detail="Email not found")
+        try:
+            vec = await embedder.embed_text(
+                build_email_text(email.subject, email.body_text, email.snippet)
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=502, detail=f"Embedding provider error: {exc}")
+    hits = await embedder.semantic_search(
+        session, vec, limit=limit, exclude_email_id=email_id
+    )
+    return await _hydrate_hits(session, dict(hits), None, limit)
 
 
 @router.get("/stats", response_model=InboxStats)

@@ -59,6 +59,15 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
 
+    # ── Embeddings (semantic search / RAG) ──────────────────
+    # BGE-M3 (1024-dim) via HuggingFace Inference Router. Matches the pgvector
+    # column dimension declared in scripts/setup_db.py.
+    hf_token: str = ""
+    embedding_model: str = "BAAI/bge-m3"
+    embedding_dim: int = 1024
+    # Optional explicit endpoint override; if empty it is derived from the model.
+    embedding_url: str = ""
+
     # ── Classification thresholds (research-driven) ─────────
     # Jáñez-Martino: lexical prefilter is fast/cheap; escalate to LLM only if ambiguous
     lexical_confidence_threshold: float = 0.90

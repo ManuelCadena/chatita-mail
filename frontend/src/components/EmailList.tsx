@@ -1,27 +1,43 @@
 // Chatita Mail v3.0 — middle pane: email list for the active folder
 import { useQuery } from "@tanstack/react-query";
-import { Paperclip, Loader2, Inbox as InboxIcon } from "lucide-react";
-import { listEmails } from "../api/client";
+import { Paperclip, Loader2, Inbox as InboxIcon, Sparkles } from "lucide-react";
+import { listEmails, searchSemantic } from "../api/client";
 import { folderByKey, useUI } from "../store";
 import { CategoryBadge, SecurityBadge } from "./badges";
 import { avatarColor, initials, relativeDate } from "../lib/format";
 
 export default function EmailList() {
-  const { folderKey, selectedEmailId, selectEmail, search, unreadOnly, sortMode, setSortMode } = useUI();
+  const { folderKey, selectedEmailId, selectEmail, search, searchMode, unreadOnly, sortMode, setSortMode } =
+    useUI();
   const folder = folderByKey(folderKey);
+  // Semantic mode kicks in only when the user has typed a query (>=2 chars);
+  // otherwise fall back to the normal folder listing.
+  const semantic = searchMode === "meaning" && search.trim().length >= 2;
 
   const { data: emails = [], isLoading } = useQuery({
-    queryKey: ["emails", folder.key, folder.status, folder.category, search, unreadOnly, sortMode],
+    queryKey: [
+      "emails",
+      folder.key,
+      folder.status,
+      folder.category,
+      search,
+      searchMode,
+      unreadOnly,
+      sortMode,
+    ],
     queryFn: () =>
-      listEmails({
-        status: folder.status,
-        category: folder.category,
-        search: search || undefined,
-        unread_only: unreadOnly || undefined,
-        sort: sortMode,
-        limit: 100,
-      }),
-    refetchInterval: 20000,
+      semantic
+        ? searchSemantic({ q: search.trim(), status: "ALL", limit: 50 })
+        : listEmails({
+            status: folder.status,
+            category: folder.category,
+            search: search || undefined,
+            unread_only: unreadOnly || undefined,
+            sort: sortMode,
+            limit: 100,
+          }),
+    // Don't auto-refetch semantic results (each triggers an embedding call).
+    refetchInterval: semantic ? false : 20000,
   });
 
   return (
@@ -122,6 +138,11 @@ export default function EmailList() {
                 <div className="truncate text-xs text-slate-400">{e.snippet}</div>
 
                 <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                  {typeof e.similarity === "number" && (
+                    <span className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full border border-indigo-200 bg-indigo-50 text-indigo-600">
+                      <Sparkles size={10} /> {Math.round(e.similarity * 100)}%
+                    </span>
+                  )}
                   <CategoryBadge category={e.category} size="xs" />
                   <SecurityBadge level={e.risk_level} score={e.risk_score} size="xs" />
                   {e.is_newsletter && (

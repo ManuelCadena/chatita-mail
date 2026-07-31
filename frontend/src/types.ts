@@ -36,6 +36,7 @@ export interface EmailListItem {
   unsubscribe_url: string | null;
   risk_level: RiskLevel | null;
   risk_score: number | null;
+  similarity?: number; // present only for semantic search results (0-1)
 }
 
 export interface ClassificationDetail {
