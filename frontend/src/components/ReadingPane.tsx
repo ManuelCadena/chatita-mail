@@ -125,6 +125,26 @@ export default function ReadingPane() {
     setDraft(null);
   }, [selectedEmailId]);
 
+  // Open any clicked in-email link in a SEPARATE browser WINDOW (not a tab).
+  // Passing explicit width/height + "popup" makes the browser spawn a distinct
+  // window, so the external page renders on its own and Mail stays open in the
+  // background for the user to return to. (target=_blank alone opens a tab.)
+  const openLinkInWindow = (e: React.MouseEvent<HTMLDivElement>) => {
+    const anchor = (e.target as HTMLElement).closest("a");
+    const href = anchor?.getAttribute("href");
+    if (!href || !/^https?:\/\//i.test(href)) return; // ignore anchors/mailto/etc.
+    e.preventDefault();
+    const w = Math.min(1280, Math.round(window.screen.availWidth * 0.8));
+    const h = Math.min(900, Math.round(window.screen.availHeight * 0.85));
+    const left = Math.round((window.screen.availWidth - w) / 2);
+    const top = Math.round((window.screen.availHeight - h) / 2);
+    window.open(
+      href,
+      "_blank",
+      `popup=yes,noopener,noreferrer,width=${w},height=${h},left=${left},top=${top}`
+    );
+  };
+
   const sanitized = useMemo(() => {
     if (!data?.body_html) return null;
     return DOMPurify.sanitize(data.body_html, {
@@ -339,6 +359,7 @@ export default function ReadingPane() {
         {sanitized ? (
           <div
             className="email-html prose prose-sm max-w-none text-slate-800"
+            onClick={openLinkInWindow}
             // eslint-disable-next-line react/no-danger
             dangerouslySetInnerHTML={{ __html: sanitized }}
           />
