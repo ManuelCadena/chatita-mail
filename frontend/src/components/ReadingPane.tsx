@@ -38,6 +38,19 @@ import { CategoryBadge, SecurityBadge } from "./badges";
 import { avatarColor, deadlineLabel, fullDate, initials } from "../lib/format";
 import type { EmailStatus } from "../types";
 
+// Force every link inside a rendered email body to open in a NEW browser tab.
+// The Mail app runs inside an iframe (chatita.ai/mail/). A default (same-frame)
+// click navigates that iframe to the external URL, which most sites refuse via
+// X-Frame-Options / frame-ancestors → the browser shows a blank grey
+// "This content is blocked" screen. Opening top-level (_blank) loads the site
+// normally and keeps Mail untouched so the user can return to it.
+DOMPurify.addHook("afterSanitizeAttributes", (node) => {
+  if (node.tagName === "A" && node.getAttribute("href")) {
+    node.setAttribute("target", "_blank");
+    node.setAttribute("rel", "noopener noreferrer");
+  }
+});
+
 export default function ReadingPane() {
   const { selectedEmailId, selectEmail } = useUI();
   const qc = useQueryClient();
