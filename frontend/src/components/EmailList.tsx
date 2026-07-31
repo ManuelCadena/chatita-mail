@@ -7,17 +7,18 @@ import { CategoryBadge, SecurityBadge } from "./badges";
 import { avatarColor, initials, relativeDate } from "../lib/format";
 
 export default function EmailList() {
-  const { folderKey, selectedEmailId, selectEmail, search, unreadOnly } = useUI();
+  const { folderKey, selectedEmailId, selectEmail, search, unreadOnly, sortMode, setSortMode } = useUI();
   const folder = folderByKey(folderKey);
 
   const { data: emails = [], isLoading } = useQuery({
-    queryKey: ["emails", folder.key, folder.status, folder.category, search, unreadOnly],
+    queryKey: ["emails", folder.key, folder.status, folder.category, search, unreadOnly, sortMode],
     queryFn: () =>
       listEmails({
         status: folder.status,
         category: folder.category,
         search: search || undefined,
         unread_only: unreadOnly || undefined,
+        sort: sortMode,
         limit: 100,
       }),
     refetchInterval: 20000,
@@ -27,7 +28,34 @@ export default function EmailList() {
     <div className="w-[380px] shrink-0 border-r border-slate-200 bg-white flex flex-col">
       <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
         <h2 className="font-semibold text-slate-800">{folder.label}</h2>
-        <span className="text-xs text-slate-400">{emails.length} shown</span>
+        <div className="flex items-center gap-2">
+          {/* Sort toggle: importance-first (default) vs strictly newest-first */}
+          <div className="flex rounded-md border border-slate-200 overflow-hidden text-[11px]">
+            <button
+              onClick={() => setSortMode("priority")}
+              title="Ordenar por importancia (Critical primero)"
+              className={`px-2 py-0.5 transition ${
+                sortMode === "priority"
+                  ? "bg-slate-900 text-white"
+                  : "bg-white text-slate-500 hover:bg-slate-50"
+              }`}
+            >
+              Prioridad
+            </button>
+            <button
+              onClick={() => setSortMode("date")}
+              title="Ordenar por fecha (más reciente primero)"
+              className={`px-2 py-0.5 transition ${
+                sortMode === "date"
+                  ? "bg-slate-900 text-white"
+                  : "bg-white text-slate-500 hover:bg-slate-50"
+              }`}
+            >
+              Fecha
+            </button>
+          </div>
+          <span className="text-xs text-slate-400">{emails.length}</span>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto">

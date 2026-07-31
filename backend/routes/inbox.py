@@ -6,7 +6,7 @@ Endpoints to ingest, list, and read emails.
 from __future__ import annotations
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -105,22 +105,46 @@ async def ingest_email(
     return EmailOut.model_validate(email)
 
 
+# Importance rank for smart sorting: lower = shown first. Emails with no
+# classification yet (or UNCLASSIFIED) rank between LOW and SPAM so they never
+# hide genuinely important mail nor pollute the top with noise.
+_CATEGORY_RANK = case(
+    (Classification.category == EmailCategory.CRITICAL, 0),
+    (Classification.category == EmailCategory.IMPORTANT, 1),
+    (Classification.category == EmailCategory.MEDIUM, 2),
+    (Classification.category == EmailCategory.LOW, 3),
+    (Classification.category == EmailCategory.SPAM, 5),
+    (Classification.category == EmailCategory.NOISE, 6),
+    else_=4,
+)
+
+
 @router.get("/emails", response_model=list[EmailOut])
 async def list_emails(
     status: EmailStatus | None = Query(None),
     category: EmailCategory | None = Query(None),
     unread_only: bool = Query(False),
     search: str | None = Query(None, description="Match subject/sender/snippet"),
+    sort: str = Query("priority", pattern="^(priority|date)$", description="priority: importance then recency; date: recency only"),
     limit: int = Query(50, le=200),
     offset: int = Query(0, ge=0),
     session: AsyncSession = Depends(get_session),
 ) -> list[EmailOut]:
-    """List emails with optional status/category/search filters, newest first."""
-    stmt = (
-        select(Email)
-        .options(selectinload(Email.classification), selectinload(Email.security_event))
-        .order_by(Email.received_at.desc().nullslast(), Email.created_at.desc())
+    """List emails with optional filters.
+
+    sort='priority' (default): CRITICAL → IMPORTANT → MEDIUM → LOW → (unclassified)
+    → SPAM → NOISE, newest-first within each level.
+    sort='date': strictly newest-first regardless of importance.
+    """
+    stmt = select(Email).options(
+        selectinload(Email.classification), selectinload(Email.security_event)
     )
+    # A classification join is needed to filter by category AND to sort by
+    # importance. Use an OUTER join so emails without a classification row still
+    # appear (critical for the default priority view over the full inbox).
+    if category is not None or sort == "priority":
+        stmt = stmt.outerjoin(Classification, Classification.email_id == Email.id)
+
     if status:
         stmt = stmt.where(Email.status == status)
     if unread_only:
@@ -136,7 +160,16 @@ async def list_emails(
             )
         )
     if category:
-        stmt = stmt.join(Email.classification).where(Classification.category == category)
+        stmt = stmt.where(Classification.category == category)
+
+    if sort == "priority":
+        stmt = stmt.order_by(
+            _CATEGORY_RANK.asc(),
+            Email.received_at.desc().nullslast(),
+            Email.created_at.desc(),
+        )
+    else:
+        stmt = stmt.order_by(Email.received_at.desc().nullslast(), Email.created_at.desc())
 
     stmt = stmt.limit(limit).offset(offset)
     emails = list((await session.scalars(stmt)).all())

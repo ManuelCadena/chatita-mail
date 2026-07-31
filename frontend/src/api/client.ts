@@ -25,6 +25,7 @@ export async function listEmails(params: {
   category?: EmailCategory;
   unread_only?: boolean;
   search?: string;
+  sort?: "priority" | "date";
   limit?: number;
 }): Promise<EmailListItem[]> {
   const { data } = await api.get<EmailListItem[]>("/inbox/emails", { params });
