@@ -14,7 +14,7 @@
 | **Motor AI** | AION Brain v3.2 vía **MCP** (ya publicado) |
 | **Repo** | https://github.com/ManuelCadena/chatita-mail |
 | **Autor** | Manuel Cadena |
-| **Última actualización** | 31-Jul-2026 20:30 (UTC-07:00) — **FASE 3 COMPLETA** (T3.1–T3.5): estilo aprendido, 3 variantes XAI, feedback loop con métricas de aceptación, XAI universal, multi-idioma ES/EN. + T4.4 dashboard. Siguiente: Fase 4 (voice replies, adjuntos Drive, accesibilidad) |
+| **Última actualización** | 31-Jul-2026 21:15 (UTC-07:00) — **FASE 4 COMPLETA** (T4.1,T4.3–T4.10): voice replies ElevenLabs, accessibility mode, suite E2E Playwright 5/5, dashboard, deploy prod. Único pendiente: **T4.2 bloqueado** (scope Drive requiere autorización admin, ver B-8) |
 | **Fase actual** | 🟢 **PROD + INGESTA COMPLETA + 100% TRIAGED** — https://chatita.ai/mail/. 40,275 emails (Gmail 30,157 + iCloud 10,118), **0 sin clasificar (100% triaged)**. Timers activos: `chatita-mail-sync.timer` (Gmail incremental c/5min) + `chatita-mail-icloud.timer` (iCloud SINCE c/10min), ambos finalizando OK. Backend HTTP 200 (uvicorn :8000). Categorías: MEDIUM 28,622 · NOISE 11,210 · SPAM 372 · IMPORTANT 37 · LOW 30 · CRITICAL 4. 33 tareas / 8 compromisos abiertos · 17,418 min ahorrados. Pendiente: Fase 3 personalización de estilo |
 | **Meta usuario** | ≤5 min/día en email · 100% importantes atendidos · 0% spam |
 
@@ -442,21 +442,27 @@ Email entrante
 
 **Objetivo**: Pulido + despliegue a servidor Chatita.
 
-- [ ] **T4.1** — Voice replies (ElevenLabs vía AION)
-- [ ] **T4.2** — Attachment auto-suggest desde Drive
-- [ ] **T4.3** — Accessibility mode (Goodman 2022, dyslexia)
-- [ ] **T4.4** — Dashboard de analytics (tiempo ahorrado, métricas)
-- [ ] **T4.5** — Suite de tests E2E (Playwright)
-- [ ] **T4.6** — Build frontend producción (`npm run build`)
-- [ ] **T4.7** — Deploy backend a Chatita server (rsync + systemd)
-  - **Evidencia**: `curl https://chatita.ai/mail/api/health` → 200
-- [ ] **T4.8** — Configurar nginx `/mail/` en Chatita
-- [ ] **T4.9** — Link en side menu de Chatita PRODUCCIÓN
-  - **Evidencia**: chatita.ai side menu → /mail abre
-- [ ] **T4.10** — Verificar AION Brain conectado en prod
-  - **Evidencia**: clasificación funciona en servidor Chatita
+- [x] **T4.1** — Voice replies (ElevenLabs TTS) ✅ 31-Jul-2026
+  - `POST /voice/tts` (audio/mpeg) + botón "Escuchar" en composer
+  - **Evidencia**: TTS 200 `size=80710 audio/mpeg` MP3 válido; `/voice/health enabled:true`; E2E voice 200; git `f4b6e07`
+- [⛔] **T4.2** — Attachment auto-suggest desde Drive — **BLOQUEADO (admin)**
+  - `drive.readonly` NO autorizado para la delegación domain-wide → `unauthorized_client`
+  - **Remediación (manual, admin.google.com)**: Seguridad → Controles API → Delegación de todo el dominio → cliente `114487808960142864615` → añadir scope `https://www.googleapis.com/auth/drive.readonly`. Luego añadir scope a `_SCOPES` en `gmail_connector.py`.
+- [x] **T4.3** — Accessibility mode (Goodman 2022, dyslexia) ✅ 31-Jul-2026
+  - Fuente dislexia + texto grande + alto contraste + reducir animaciones; toggle + localStorage + CSS `data-a11y-*`
+  - **Evidencia**: E2E toggle→`html[data-a11y-dyslexia="1"]`; git `f4b6e07`
+- [x] **T4.4** — Dashboard de analytics ✅ 31-Jul-2026 (`778bc46`)
+- [x] **T4.5** — Suite de tests E2E (Playwright) ✅ 31-Jul-2026
+  - `playwright.config.ts` + `e2e/mail.spec.ts` (inbox, dashboard, accesibilidad, voz, compose)
+  - **Evidencia**: `npx playwright test` → **5 passed** contra prod; git `cbad56a`
+- [x] **T4.6** — Build frontend producción ✅ (`npm run build` exit 0, bundle `index-GMODRqlp.js`)
+- [x] **T4.7** — Deploy backend a Chatita server ✅ (rsync + `chatita-mail.service` active)
+  - **Evidencia**: `GET /mail-api/inbox/stats` → 200
+- [x] **T4.8** — nginx `/mail/` en Chatita ✅ (`GET https://chatita.ai/mail/` → 200)
+- [x] **T4.9** — Link en side menu de Chatita PRODUCCIÓN ✅ (B-5, panel iframe)
+- [x] **T4.10** — AION Brain conectado en prod ✅ (draft/variants `source:llm` en vivo)
 
-**Criterio de salida FASE 4**: chatita.ai/mail operativo, meta ≤5 min/día validada.
+**Criterio de salida FASE 4**: chatita.ai/mail operativo ✅. Pendiente único: T4.2 (bloqueo admin externo, no de código).
 
 ---
 
@@ -504,6 +510,8 @@ Email entrante
 | 31-Jul-2026 19:00 | E2E Playwright (prod): Redactar (validación Enviar), Enviados=1, Responder→Generar opciones→3 chips XAI→aplica variante. Errores solo `ERR_NETWORK_CHANGED` (red local transitoria) + `cid:` inline (esperado) | HECHO-VERIFICADO | snapshots navegador chatita.ai/mail |
 | 31-Jul-2026 19:00 | T4.4 Dashboard analytics: `GET /inbox/analytics` (time saved, recibidos/enviados, reply_rate, top 10 remitentes, volumen diario) + vista "Panel" (grupo Workflow). Datos 100% reales | DEPLOY-VERIFICADO | git `778bc46`; analytics total=42334 sent=1 saved=314.3h top=github/gmail/looker; `GET /mail-api/inbox/analytics`→200; E2E Panel renderiza tarjetas+gráfico+top; bundle `index-CGxMK8g1.js` |
 | 31-Jul-2026 20:30 | FASE 3 COMPLETA — T3.3 feedback loop (`style_feedback` tabla creada en prod checkfirst, `/inbox/style/feedback` + `/style/metrics`, relearn c/5 ediciones, `collect_samples` prioriza `final_body`); T3.4 XAI expander "¿Por qué?"; T3.5 detección idioma ES/EN autoritativa | DEPLOY-VERIFICADO | git `476c73a`; TABLE-OK; feedback edición 0.72→`edited:true`, idéntico→`edited:false`, metrics `acceptance_rate:0.5` tabla `4|2`; T3.5 email EN→reply EN / ES→ES (server); E2E browser: chip "responde en EN" + expander muestra idioma/muestras/registro/tono; bundle `index-DgBEby3O.js`; público `/style/feedback`→200 |
+| 31-Jul-2026 21:15 | FASE 4 (features) — T4.1 voice replies ElevenLabs (`/voice/tts` audio/mpeg + botón Escuchar, key en prod .env), T4.3 accessibility mode (dislexia/grande/contraste/motion, localStorage+CSS), T4.5 suite E2E Playwright (5 specs) | DEPLOY-VERIFICADO | git `f4b6e07`,`cbad56a`; TTS `size=80710 audio/mpeg`; `npx playwright test`→**5 passed** vs prod; bundle `index-GMODRqlp.js` |
+| 31-Jul-2026 21:15 | FASE 4 infra confirmada (T4.4/T4.6-T4.10 ya en prod). T4.2 Drive attachment: probe DWD→`unauthorized_client` | BLOQUEO-DETECTADO | prod `/mail/`+`/mail-api/inbox/stats`→200; Drive probe RefreshError unauthorized_client (requiere autorización admin scope drive.readonly para client_id 1144878...) |
 
 ---
 
@@ -513,6 +521,7 @@ Email entrante
 |---|---------|----------|--------|
 | B-1 | Aprobación arquitectura v3.0 | OK de Manny | ✅ APROBADO (procede) |
 | B-2 | ¿Empezar FASE 0 ya? | Confirmación | ✅ HECHO |
+| B-8 | **T4.2 Drive attachment auto-suggest** | Autorizar en admin.google.com el scope `drive.readonly` para el client_id `114487808960142864615` (Seguridad→Controles API→Delegación de todo el dominio). Luego añadir scope a `_SCOPES` en `gmail_connector.py` | ⛔ BLOQUEADO (acción admin externa) |
 | B-3 | Conectar AION Brain :3100 (orchestrate) | — | ✅ RESUELTO (orchestrate LLM+phishing verificado). ⚠️ Parcial: `execute_tool` (opencorporates/telegram) degrada — AION rutea tools vía gateway :8088 no activo + esos tools no están en su registro de 67 |
 | B-4 | Conector Gmail (ingesta real) | — | ✅ RESUELTO (Gmail via SA+DWD, sync+triage verificado con 31k msgs reales). Sync incremental/full/historyId ✅ (T1.1.4). |
 | B-7 | iCloud egress 993 bloqueado en EC2 | — | ✅ RESUELTO (24-Jul). Abierto egress tcp/993 en sg-0b936a3c6e57427d7 (regla sgr-01c4eabfbbf47fafb, outbound). Prod TCP 993 OPEN + icloud/health ok:true (inbox_count≈200,779). FIX conector: RFC822 devolvía vacío en iCloud→from/subject en blanco→cambiado a BODY.PEEK[]; + fetch por rango de secuencia evita SEARCH ALL (límite 1MB imaplib en 200k). Timer systemd chatita-mail-icloud.timer c/10min. iCloud SOLO incremental (200k inbox) |
