@@ -15,7 +15,7 @@
 | **Repo** | https://github.com/ManuelCadena/chatita-mail |
 | **Autor** | Manuel Cadena |
 | **Última actualización** | 31-Jul-2026 21:40 (UTC-07:00) — **FASE 4 100% COMPLETA** (T4.1–T4.10): voice replies ElevenLabs, Drive attachment auto-suggest, accessibility mode, suite E2E Playwright **6/6**, dashboard, deploy prod. Fases 1–4 cerradas. |
-| **Fase actual** | 🟢 **PROD + INGESTA COMPLETA + 100% TRIAGED** — https://chatita.ai/mail/. 40,275 emails (Gmail 30,157 + iCloud 10,118), **0 sin clasificar (100% triaged)**. Timers activos: `chatita-mail-sync.timer` (Gmail incremental c/5min) + `chatita-mail-icloud.timer` (iCloud SINCE c/10min), ambos finalizando OK. Backend HTTP 200 (uvicorn :8000). Categorías: MEDIUM 28,622 · NOISE 11,210 · SPAM 372 · IMPORTANT 37 · LOW 30 · CRITICAL 4. 33 tareas / 8 compromisos abiertos · 17,418 min ahorrados. **Roadmap 5 fases (0–4) 100% completo — producto terminado.** |
+| **Fase actual** | 🟢 **PROD + INGESTA COMPLETA + 100% TRIAGED** — https://chatita.ai/mail/. 40,275 emails (Gmail 30,157 + iCloud 10,118), **0 sin clasificar (100% triaged)**. Timers activos: `chatita-mail-sync.timer` (Gmail incremental c/5min) + `chatita-mail-icloud.timer` (iCloud SINCE c/10min), ambos finalizando OK. Backend HTTP 200 (uvicorn :8000). Categorías: MEDIUM 28,622 · NOISE 11,210 · SPAM 372 · IMPORTANT 37 · LOW 30 · CRITICAL 4. 33 tareas / 8 compromisos abiertos · 17,418 min ahorrados. **Core completo (Fases 0,1,3,4 ✅). Fase 2 PARCIAL** — falta automatización Calendar: T2.2 (crear eventos), T2.3 (auto-follow-up), T2.4 (MeetingScheduler); T2.6 docgen Drive. |
 | **Meta usuario** | ≤5 min/día en email · 100% importantes atendidos · 0% spam |
 
 ---
@@ -375,38 +375,32 @@ Email entrante
 
 ---
 
-## ✅ FASE 2 — WORKFLOW AUTOMATION (Semanas 4-6)
+## ⚠️ FASE 2 — WORKFLOW AUTOMATION (Semanas 4-6) — PARCIAL
 
 **Objetivo**: Email→Action automático. **10→5 min/día**.
 
-- [ ] **T2.1** — `TaskExtractor` (Morrison 2024)
+- [x] **T2.1** — `TaskExtractor` (Morrison 2024) ✅
   - Extraer tareas + commitments de threads
-  - **Evidencia**: tareas extraídas de email de prueba
+  - **Evidencia**: `POST /inbox/emails/{id}/extract`, `GET /tasks`, `GET /commitments`; 33 tareas / 8 compromisos en prod
 
-- [ ] **T2.2** — Commitment tracking (propios + de otros)
-  - Crear reminders en Google Calendar
-  - **Evidencia**: evento creado en calendario
+- [~] **T2.2** — Commitment tracking (propios + de otros) — **PARCIAL**
+  - Rastreo en DB ✅. **Crear reminders en Google Calendar: ❌ pendiente** (scope `calendar`/`calendar.events` ya autorizado en DWD)
 
-- [ ] **T2.3** — Auto-follow-up (commitments incumplidos)
-  - **Evidencia**: draft de seguimiento generado
+- [ ] **T2.3** — Auto-follow-up (commitments incumplidos) — ❌ pendiente
 
-- [ ] **T2.4** — `MeetingScheduler` (Navarro 2025)
-  - Detectar solicitud → buscar disponibilidad → proponer/crear
-  - **Evidencia**: meeting agendado automáticamente
+- [ ] **T2.4** — `MeetingScheduler` (Navarro 2025) — ❌ pendiente
+  - Detectar solicitud → buscar disponibilidad → proponer/crear (implica auto-envío de invites)
 
-- [ ] **T2.5** — Thread summarization (EMAILSUM/Zhang 2021)
-  - Resumir thread completo con contexto de relación
-  - **Evidencia**: resumen de thread largo con puntos accionables
+- [x] **T2.5** — Thread summarization (EMAILSUM/Zhang 2021) ✅
+  - **Evidencia**: `POST /inbox/emails/{id}/summarize` en prod (botón Resumir en ReadingPane)
 
-- [ ] **T2.6** — Document generation desde email
-  - Buscar docs en Drive + generar draft
-  - **Evidencia**: doc creado en Drive
+- [~] **T2.6** — Document generation desde email — **PARCIAL**
+  - Búsqueda Drive ✅ (T4.2 `/inbox/drive/search`). **Generar draft doc en Drive: ❌ pendiente**
 
-- [ ] **T2.7** — Motor de aprobación (human-in-the-loop)
-  - Acciones críticas esperan OK de Manny
-  - **Evidencia**: acción pausada hasta aprobación
+- [~] **T2.7** — Motor de aprobación (human-in-the-loop) — **PARCIAL**
+  - Confirmación previa al envío (compose/reply/forward) ✅. Cola formal de aprobación de acciones automáticas: ❌ pendiente
 
-**Criterio de salida FASE 2**: tiempo 10→5 min, 0 commitments olvidados, 80% meetings auto.
+**Criterio de salida FASE 2**: tiempo 10→5 min, 0 commitments olvidados, 80% meetings auto. → ⚠️ **PARCIAL**: extracción+tracking+summarization ✅; falta automatización de Calendar (T2.2 write, T2.3, T2.4).
 
 ---
 
