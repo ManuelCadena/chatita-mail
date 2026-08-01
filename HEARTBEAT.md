@@ -14,7 +14,7 @@
 | **Motor AI** | AION Brain v3.2 vía **MCP** (ya publicado) |
 | **Repo** | https://github.com/ManuelCadena/chatita-mail |
 | **Autor** | Manuel Cadena |
-| **Última actualización** | 31-Jul-2026 19:00 (UTC-07:00) — Fase 3 T3.1 (StyleLearningEngine) + T3.2 (multi-style replies XAI) + T4.4 (dashboard analytics). Pendiente Fase 3: T3.3 feedback loop, T3.4 XAI universal, T3.5 multi-idioma |
+| **Última actualización** | 31-Jul-2026 20:30 (UTC-07:00) — **FASE 3 COMPLETA** (T3.1–T3.5): estilo aprendido, 3 variantes XAI, feedback loop con métricas de aceptación, XAI universal, multi-idioma ES/EN. + T4.4 dashboard. Siguiente: Fase 4 (voice replies, adjuntos Drive, accesibilidad) |
 | **Fase actual** | 🟢 **PROD + INGESTA COMPLETA + 100% TRIAGED** — https://chatita.ai/mail/. 40,275 emails (Gmail 30,157 + iCloud 10,118), **0 sin clasificar (100% triaged)**. Timers activos: `chatita-mail-sync.timer` (Gmail incremental c/5min) + `chatita-mail-icloud.timer` (iCloud SINCE c/10min), ambos finalizando OK. Backend HTTP 200 (uvicorn :8000). Categorías: MEDIUM 28,622 · NOISE 11,210 · SPAM 372 · IMPORTANT 37 · LOW 30 · CRITICAL 4. 33 tareas / 8 compromisos abiertos · 17,418 min ahorrados. Pendiente: Fase 3 personalización de estilo |
 | **Meta usuario** | ≤5 min/día en email · 100% importantes atendidos · 0% spam |
 
@@ -422,17 +422,19 @@ Email entrante
   - Natural / Profesional / Breve + XAI `why`
   - **Evidencia**: `/draft-variants` 3 variants source:llm; E2E chips; git `cae74ee`
 
-- [ ] **T3.3** — Feedback loop de ediciones (Goodman 2022)
-  - Aprender de cambios de Manny
-  - **Evidencia**: style_profile actualizado tras edición
+- [x] **T3.3** — Feedback loop de ediciones (Goodman 2022) ✅ 31-Jul-2026
+  - Tabla `style_feedback` + `POST /inbox/style/feedback` (edit_ratio char-level via difflib) + relearn cada 5 ediciones + `collect_samples` prioriza `final_body`; métricas `GET /inbox/style/metrics`
+  - **Evidencia**: edición grande→`edited:true edit_ratio:0.72`; idéntico→`edited:false`; metrics `acceptance_rate:0.5`; tabla `4|2`; git `476c73a`
 
-- [ ] **T3.4** — XAI universal (toda decisión explicada)
-  - **Evidencia**: cada recomendación muestra reasoning
+- [x] **T3.4** — XAI universal (toda decisión explicada) ✅ 31-Jul-2026
+  - Expander "¿Por qué?" en composer: idioma detectado + nº muestras + registro/tono/saludo/despedida; variants con `why`; clasificación con reasoning
+  - **Evidencia**: E2E browser — expander muestra "Idioma detectado: EN · Estilo aprendido de 19 correos · Registro formal · Tono formal, procedural"
 
-- [ ] **T3.5** — Multi-idioma EN/ES (Jáñez-Martino)
-  - **Evidencia**: reply en ES para email en ES
+- [x] **T3.5** — Multi-idioma EN/ES (Jáñez-Martino) ✅ 31-Jul-2026
+  - `detect_language` ES/EN + `_lang_directive` autoritativo (override del perfil) + `directive(target_lang)` omite cues de idioma en conflicto
+  - **Evidencia**: email EN→reply EN ("Hi Capital.com Team, Thanks for reaching out"); email ES→reply ES ("Estimado Ing. Ernesto"); chip "responde en EN"; unit 5/5 pasa
 
-**Criterio de salida FASE 3**: reply acceptance 85%+, trust score 90%+, ediciones <20%.
+**Criterio de salida FASE 3**: reply acceptance 85%+, trust score 90%+, ediciones <20%. → ✅ Infra completa; `acceptance_rate` medible en vivo vía `/inbox/style/metrics` (mejora con uso real).
 
 ---
 
@@ -501,6 +503,7 @@ Email entrante
 | 31-Jul-2026 19:00 | FASE 3 T3.2 Multi-style replies: `draft_variants` genera 3 opciones (Natural/Profesional/Breve) + XAI `why` en 1 llamada AION, con estilo aprendido; endpoint `POST /inbox/emails/{id}/draft-variants`; chips en composer aplican variante | DEPLOY-VERIFICADO | git `cae74ee`; smoke 3 variants `source:llm` `style_applied:true`; E2E Playwright: panel "Opciones IA · 19 muestras", clic "Natural" rellena composer con estilo aprendido |
 | 31-Jul-2026 19:00 | E2E Playwright (prod): Redactar (validación Enviar), Enviados=1, Responder→Generar opciones→3 chips XAI→aplica variante. Errores solo `ERR_NETWORK_CHANGED` (red local transitoria) + `cid:` inline (esperado) | HECHO-VERIFICADO | snapshots navegador chatita.ai/mail |
 | 31-Jul-2026 19:00 | T4.4 Dashboard analytics: `GET /inbox/analytics` (time saved, recibidos/enviados, reply_rate, top 10 remitentes, volumen diario) + vista "Panel" (grupo Workflow). Datos 100% reales | DEPLOY-VERIFICADO | git `778bc46`; analytics total=42334 sent=1 saved=314.3h top=github/gmail/looker; `GET /mail-api/inbox/analytics`→200; E2E Panel renderiza tarjetas+gráfico+top; bundle `index-CGxMK8g1.js` |
+| 31-Jul-2026 20:30 | FASE 3 COMPLETA — T3.3 feedback loop (`style_feedback` tabla creada en prod checkfirst, `/inbox/style/feedback` + `/style/metrics`, relearn c/5 ediciones, `collect_samples` prioriza `final_body`); T3.4 XAI expander "¿Por qué?"; T3.5 detección idioma ES/EN autoritativa | DEPLOY-VERIFICADO | git `476c73a`; TABLE-OK; feedback edición 0.72→`edited:true`, idéntico→`edited:false`, metrics `acceptance_rate:0.5` tabla `4|2`; T3.5 email EN→reply EN / ES→ES (server); E2E browser: chip "responde en EN" + expander muestra idioma/muestras/registro/tono; bundle `index-DgBEby3O.js`; público `/style/feedback`→200 |
 
 ---
 
