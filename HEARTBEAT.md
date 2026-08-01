@@ -14,7 +14,7 @@
 | **Motor AI** | AION Brain v3.2 vía **MCP** (ya publicado) |
 | **Repo** | https://github.com/ManuelCadena/chatita-mail |
 | **Autor** | Manuel Cadena |
-| **Última actualización** | 31-Jul-2026 18:33 (UTC-07:00) — Compose & Send completo (reply/reply-all/forward/redactar) + persistencia SENT + carpeta Enviados |
+| **Última actualización** | 31-Jul-2026 19:00 (UTC-07:00) — Fase 3 T3.1 (StyleLearningEngine) + T3.2 (multi-style replies XAI) + T4.4 (dashboard analytics). Pendiente Fase 3: T3.3 feedback loop, T3.4 XAI universal, T3.5 multi-idioma |
 | **Fase actual** | 🟢 **PROD + INGESTA COMPLETA + 100% TRIAGED** — https://chatita.ai/mail/. 40,275 emails (Gmail 30,157 + iCloud 10,118), **0 sin clasificar (100% triaged)**. Timers activos: `chatita-mail-sync.timer` (Gmail incremental c/5min) + `chatita-mail-icloud.timer` (iCloud SINCE c/10min), ambos finalizando OK. Backend HTTP 200 (uvicorn :8000). Categorías: MEDIUM 28,622 · NOISE 11,210 · SPAM 372 · IMPORTANT 37 · LOW 30 · CRITICAL 4. 33 tareas / 8 compromisos abiertos · 17,418 min ahorrados. Pendiente: Fase 3 personalización de estilo |
 | **Meta usuario** | ≤5 min/día en email · 100% importantes atendidos · 0% spam |
 
@@ -414,13 +414,13 @@ Email entrante
 
 **Objetivo**: Replies auténticos + confianza total. **85%+ acceptance**.
 
-- [ ] **T3.1** — `StyleLearningEngine` (Novelo 2025)
-  - Analizar 100 emails enviados → perfil de estilo
-  - **Evidencia**: JSON de style_profile guardado
+- [x] **T3.1** — `StyleLearningEngine` (Novelo 2025) ✅ 31-Jul-2026
+  - Analizar emails enviados → perfil de estilo (+seed Gmail SENT)
+  - **Evidencia**: `style_profiles` upsert `sample_size:19 source:llm`; git `8b55637`
 
-- [ ] **T3.2** — Multi-style replies (3 opciones, Liu 2022)
-  - Natural / Professional / Brief + XAI
-  - **Evidencia**: 3 opciones generadas con explicación
+- [x] **T3.2** — Multi-style replies (3 opciones, Liu 2022) ✅ 31-Jul-2026
+  - Natural / Profesional / Breve + XAI `why`
+  - **Evidencia**: `/draft-variants` 3 variants source:llm; E2E chips; git `cae74ee`
 
 - [ ] **T3.3** — Feedback loop de ediciones (Goodman 2022)
   - Aprender de cambios de Manny
@@ -497,6 +497,10 @@ Email entrante
 | 23-Jul-2026 02:40 | UI OVERHAUL v3 (React): layout 3 paneles — Sidebar (folders+counts+sync+time-saved), EmailList (avatars/badges/unread/search), ReadingPane (HTML sanitizado DOMPurify+toolbar+XAI+tasks), TasksView, header con search+unread | BUILD-VERIFICADO + E2E | npm build exit 0 (1994 mods); Playwright :5173/mail: sidebar counts, lista 25 emails reales, reading pane con body HTML + panel XAI + mark-read; 0 errores consola |
 | 31-Jul-2026 18:20 | COMPOSE & SEND: scope `gmail.send` + `send_message`/`get_headers`/`get_attachment_bytes`; rutas `/inbox/emails/{id}/reply`, `/forward`, `/inbox/compose` (threading In-Reply-To/References, adjuntos); composer en ReadingPane (responder/resp.todos/reenviar + draft IA + confirmación); búsqueda semántica (BGE-M3 pgvector) + botón Similares | DEPLOY-VERIFICADO | commit previo; envío real self OK (Gmail msg id) |
 | 31-Jul-2026 18:33 | REDACTAR + PERSISTENCIA SENT: botón "Redactar" (Sidebar) → `ComposeModal` correo nuevo con confirmación; los 4 flujos de envío persisten `Email status=SENT`; carpeta "Enviados"; enum Python `SENT` + `ALTER TYPE emailstatus ADD VALUE 'SENT'` en Postgres prod | DEPLOY-VERIFICADO | git `b78b4ae`; py_compile+tsc exit 0; enum prod `{…,SENT}`; smoke `POST /inbox/compose`→`{"sent":true,"id":"19fb9349c98b797f"}`; `SENT rows: 1` en DB; `GET /mail-api/inbox/emails?status=SENT`→200; bundle público `index-BGRABe9Z.js` |
+| 31-Jul-2026 19:00 | FASE 3 T3.1 StyleLearningEngine: aprende estilo de emails SENT (+seed automático desde etiqueta Gmail SENT si <8 muestras), extrae perfil JSON vía AION → tabla `style_profiles`; inyecta `directive` en `draft-reply`; endpoints `POST /inbox/style/learn` + `GET /inbox/style` | DEPLOY-VERIFICADO | git `8b55637`; learn→`sample_size:19, source:llm`; draft-reply `style_applied:true` con saludo "Estimado Ing."; `GET /mail-api/inbox/style`→200 |
+| 31-Jul-2026 19:00 | FASE 3 T3.2 Multi-style replies: `draft_variants` genera 3 opciones (Natural/Profesional/Breve) + XAI `why` en 1 llamada AION, con estilo aprendido; endpoint `POST /inbox/emails/{id}/draft-variants`; chips en composer aplican variante | DEPLOY-VERIFICADO | git `cae74ee`; smoke 3 variants `source:llm` `style_applied:true`; E2E Playwright: panel "Opciones IA · 19 muestras", clic "Natural" rellena composer con estilo aprendido |
+| 31-Jul-2026 19:00 | E2E Playwright (prod): Redactar (validación Enviar), Enviados=1, Responder→Generar opciones→3 chips XAI→aplica variante. Errores solo `ERR_NETWORK_CHANGED` (red local transitoria) + `cid:` inline (esperado) | HECHO-VERIFICADO | snapshots navegador chatita.ai/mail |
+| 31-Jul-2026 19:00 | T4.4 Dashboard analytics: `GET /inbox/analytics` (time saved, recibidos/enviados, reply_rate, top 10 remitentes, volumen diario) + vista "Panel" (grupo Workflow). Datos 100% reales | DEPLOY-VERIFICADO | git `778bc46`; analytics total=42334 sent=1 saved=314.3h top=github/gmail/looker; `GET /mail-api/inbox/analytics`→200; E2E Panel renderiza tarjetas+gráfico+top; bundle `index-CGxMK8g1.js` |
 
 ---
 
