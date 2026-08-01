@@ -212,6 +212,25 @@ class StyleProfile(Base):
     )
 
 
+# ── style_feedback (Phase 3 / T3.3) ─────────────────────────
+# Captures how Manny edits an AI-generated draft before sending, so the
+# StyleLearningEngine can adapt (final_body = ground-truth Manny voice).
+class StyleFeedback(Base):
+    __tablename__ = "style_feedback"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    user_key: Mapped[str] = mapped_column(String(320), index=True)
+    email_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    style: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    ai_body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    final_body: Mapped[str] = mapped_column(Text)
+    edited: Mapped[bool] = mapped_column(Boolean, default=True)
+    edit_ratio: Mapped[float] = mapped_column(Float, default=0.0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 # ── embeddings (semantic search / RAG) ──────────────────────
 # Note: vector column added via raw SQL in setup_db.py (pgvector).
 class EmbeddingMeta(Base):

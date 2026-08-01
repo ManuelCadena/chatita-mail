@@ -51,6 +51,52 @@ BODY:
 
 _VALID_TONES = {"professional", "friendly", "brief", "formal", "warm"}
 
+# T3.5 — lightweight ES/EN detector (no extra deps). Counts hint tokens and
+# accented characters; ties fall back to English. Good enough to force the reply
+# into the SENDER's language, which is what the user perceives.
+_ES_HINTS = {
+    "el", "la", "los", "las", "un", "una", "de", "del", "que", "y", "en", "es",
+    "por", "para", "con", "no", "se", "su", "al", "lo", "como", "más", "pero",
+    "este", "esta", "hola", "gracias", "saludos", "estimado", "estimada", "buenas",
+    "buenos", "días", "adjunto", "favor", "atentamente", "cordial", "usted",
+}
+_EN_HINTS = {
+    "the", "a", "an", "of", "and", "to", "in", "is", "for", "with", "not", "this",
+    "that", "hello", "hi", "thanks", "thank", "regards", "dear", "best", "please",
+    "attached", "kind", "sincerely", "your", "you", "we", "please",
+}
+_ACCENTED = set("áéíóúñ¿¡ü")
+
+_LANG_NAMES = {"es": "Spanish", "en": "English"}
+
+
+def detect_language(text: str) -> str:
+    """Return 'es' or 'en' for the given text (heuristic, ES-biased on accents)."""
+    if not text:
+        return "en"
+    low = text.lower()
+    if any(ch in _ACCENTED for ch in low):
+        # Accents strongly signal Spanish; still tally to avoid false positives.
+        pass
+    tokens = re.findall(r"[a-záéíóúñü]+", low)
+    if not tokens:
+        return "en"
+    es = sum(1 for t in tokens if t in _ES_HINTS)
+    en = sum(1 for t in tokens if t in _EN_HINTS)
+    es += sum(1 for ch in low if ch in _ACCENTED)  # accent boost
+    if es == en:
+        return "es" if any(ch in _ACCENTED for ch in low) else "en"
+    return "es" if es > en else "en"
+
+
+def _lang_directive(lang: str) -> str:
+    name = _LANG_NAMES.get(lang, "English")
+    return (
+        f"CRITICAL: Write the ENTIRE reply in {name}, including greeting and sign-off. "
+        f"This OVERRIDES any language shown in the style guide — the reply MUST be in "
+        f"{name} to match the sender."
+    )
+
 # T3.2 — multi-style reply variants (Liu 2022: offer options + explain why).
 _VARIANTS_PROMPT = """You are Manny (Manuel Cadena) drafting replies to the email below.
 Produce THREE alternative replies, each in a different style, matching the email's
@@ -93,6 +139,7 @@ class ReplyDraft:
     body: str = ""
     tone: str = "professional"
     source: str = "llm"  # llm | fallback
+    language: str = "es"  # detected sender language (es|en)
 
 
 def _parse_json_block(text: str) -> dict | None:
@@ -149,7 +196,8 @@ class Composer:
         style_directive: str | None = None,
     ) -> ReplyDraft:
         tone = tone if tone in _VALID_TONES else "professional"
-        extra_lines = []
+        lang = detect_language(f"{email.subject or ''}\n{self._body_for(email)}")
+        extra_lines = [_lang_directive(lang)]
         if style_directive:
             extra_lines.append(style_directive)
         if instructions:
@@ -174,16 +222,20 @@ class Composer:
                     body=str(data["body"]).strip(),
                     tone=str(data.get("tone") or tone),
                     source="llm",
+                    language=lang,
                 )
         except Exception as exc:  # noqa: BLE001
             logger.warning("draft_reply AION failed: %s", exc)
-        return self._fallback_reply(email, tone)
+        fb = self._fallback_reply(email, tone)
+        fb.language = lang
+        return fb
 
     async def draft_variants(
         self, email: Email, style_directive: str | None = None
     ) -> dict:
         """T3.2 — three styled reply options (Natural/Profesional/Breve) + XAI 'why'."""
-        style = style_directive or ""
+        lang = detect_language(f"{email.subject or ''}\n{self._body_for(email)}")
+        style = f"{_lang_directive(lang)}\n{style_directive or ''}".strip()
         prompt = _VARIANTS_PROMPT.format(
             style=style,
             sender=email.from_name or email.from_address,
@@ -212,10 +264,17 @@ class Composer:
                         }
                     )
                 if variants:
-                    return {"subject": subj, "variants": variants, "source": "llm"}
+                    return {
+                        "subject": subj,
+                        "variants": variants,
+                        "source": "llm",
+                        "language": lang,
+                    }
         except Exception as exc:  # noqa: BLE001
             logger.warning("draft_variants AION failed: %s", exc)
-        return self._fallback_variants(email, subject)
+        out = self._fallback_variants(email, subject)
+        out["language"] = lang
+        return out
 
     def _fallback_variants(self, email: Email, subject: str) -> dict:
         base = self._fallback_reply(email, "professional").body

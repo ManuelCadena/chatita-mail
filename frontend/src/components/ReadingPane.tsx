@@ -29,6 +29,8 @@ import {
   draftVariants,
   extractTasks,
   getEmail,
+  getStyleProfile,
+  recordStyleFeedback,
   releaseFromQuarantine,
   setRead,
   forwardEmail,
@@ -164,6 +166,10 @@ export default function ReadingPane() {
   const [compose, setCompose] = useState<ComposeState | null>(null);
   const [variants, setVariants] = useState<ReplyVariant[] | null>(null);
   const [styleMeta, setStyleMeta] = useState<{ applied: boolean; samples: number } | null>(null);
+  const [replyLang, setReplyLang] = useState<string | null>(null);
+  // Track the AI text applied to the composer so we can measure edits on send (T3.3).
+  const [aiDraft, setAiDraft] = useState<{ body: string; style: string } | null>(null);
+  const [whyOpen, setWhyOpen] = useState(false);
 
   const similarMut = useMutation({
     mutationFn: () => similarEmails(selectedEmailId as string, 8),
@@ -176,14 +182,24 @@ export default function ReadingPane() {
     onSuccess: (r) => setSummary(r),
     onError: (e: unknown) => toast.error((e as Error).message),
   });
+
+  // Learned style profile — powers the "¿Por qué?" XAI expander (T3.4).
+  const { data: styleProfile } = useQuery({
+    queryKey: ["styleProfile"],
+    queryFn: getStyleProfile,
+    staleTime: 60_000,
+  });
   // AI draft fills the open composer (opens a reply first if none is open).
   const draftMut = useMutation({
     mutationFn: () => draftReply(selectedEmailId as string, tone),
-    onSuccess: (r) =>
+    onSuccess: (r) => {
+      setReplyLang(r.language ?? null);
+      setAiDraft({ body: r.body, style: "single" });
       setCompose((prev) => {
         const base = prev ?? emptyReplyState(data);
         return { ...base, body: r.body, subject: base.subject || r.subject };
-      }),
+      });
+    },
     onError: (e: unknown) => toast.error((e as Error).message),
   });
 
@@ -193,16 +209,19 @@ export default function ReadingPane() {
     onSuccess: (r) => {
       setVariants(r.variants);
       setStyleMeta({ applied: r.style_applied, samples: r.style_samples });
+      setReplyLang(r.language ?? null);
       setCompose((prev) => prev ?? emptyReplyState(data));
     },
     onError: (e: unknown) => toast.error((e as Error).message),
   });
 
-  const applyVariant = (v: ReplyVariant) =>
+  const applyVariant = (v: ReplyVariant) => {
+    setAiDraft({ body: v.body, style: v.style });
     setCompose((prev) => {
       const base = prev ?? emptyReplyState(data);
       return { ...base, body: v.body, subject: base.subject || v.subject };
     });
+  };
 
   const sendMut = useMutation({
     mutationFn: async () => {
@@ -218,17 +237,28 @@ export default function ReadingPane() {
           include_attachments: compose.includeAttachments,
         });
       }
-      return replyEmail(selectedEmailId, {
+      const sent = await replyEmail(selectedEmailId, {
         body: compose.body,
         to,
         cc,
         subject: compose.subject,
         reply_all: compose.mode === "replyAll",
       });
+      // T3.3 — learn from how Manny edited the AI draft (fire-and-forget).
+      if (aiDraft) {
+        recordStyleFeedback({
+          final_body: compose.body,
+          ai_body: aiDraft.body,
+          style: aiDraft.style,
+          email_id: selectedEmailId,
+        }).catch(() => {});
+      }
+      return sent;
     },
     onSuccess: (r) => {
       toast.success(`Enviado${r.to?.length ? ` a ${r.to.join(", ")}` : ""}`);
       setCompose(null);
+      setAiDraft(null);
       refresh();
     },
     onError: (e: unknown) => toast.error((e as Error).message),
@@ -246,6 +276,9 @@ export default function ReadingPane() {
     setCompose(null);
     setVariants(null);
     setStyleMeta(null);
+    setReplyLang(null);
+    setAiDraft(null);
+    setWhyOpen(false);
   }, [selectedEmailId]);
 
   // Open any clicked in-email link OUTSIDE the Mail iframe so external sites
@@ -616,17 +649,48 @@ export default function ReadingPane() {
               </label>
             )}
 
-            {/* T3.2 — 3 opciones de estilo con explicación (XAI) */}
+            {/* T3.2/T3.4/T3.5 — 3 opciones de estilo + XAI + idioma detectado */}
             {compose.mode !== "forward" && variants && variants.length > 0 && (
               <div className="mt-3 rounded-lg border border-indigo-100 bg-white p-2.5">
-                <div className="flex items-center gap-1.5 text-[11px] font-semibold text-indigo-600 mb-2">
+                <div className="flex items-center gap-1.5 text-[11px] font-semibold text-indigo-600 mb-2 flex-wrap">
                   <Sparkles size={12} /> Opciones IA
                   {styleMeta?.applied && (
-                    <span className="ml-1 rounded-full bg-indigo-100 text-indigo-700 px-1.5 py-0.5 text-[9px]">
+                    <span className="rounded-full bg-indigo-100 text-indigo-700 px-1.5 py-0.5 text-[9px]">
                       tu estilo · {styleMeta.samples} muestras
                     </span>
                   )}
+                  {replyLang && (
+                    <span className="rounded-full bg-emerald-100 text-emerald-700 px-1.5 py-0.5 text-[9px] uppercase">
+                      responde en {replyLang}
+                    </span>
+                  )}
+                  <button
+                    onClick={() => setWhyOpen((v) => !v)}
+                    className="ml-auto text-[9px] text-indigo-500 hover:text-indigo-700 underline"
+                  >
+                    {whyOpen ? "ocultar" : "¿Por qué?"}
+                  </button>
                 </div>
+
+                {whyOpen && (
+                  <div className="mb-2 rounded-md bg-slate-50 border border-slate-100 p-2 text-[10px] text-slate-600 leading-relaxed">
+                    {(() => {
+                      const p = (styleProfile?.profile ?? {}) as Record<string, unknown>;
+                      const tones = (p.tone_descriptors as string[] | undefined)?.join(", ");
+                      return (
+                        <ul className="space-y-0.5">
+                          <li><b>Idioma detectado del correo:</b> {replyLang?.toUpperCase() ?? "—"}</li>
+                          <li><b>Estilo aprendido de:</b> {styleProfile?.sample_size ?? 0} correos enviados</li>
+                          {p.formality ? <li><b>Registro:</b> {String(p.formality)}</li> : null}
+                          {tones ? <li><b>Tono:</b> {tones}</li> : null}
+                          {p.greeting ? <li><b>Saludo típico:</b> "{String(p.greeting)}"</li> : null}
+                          {p.signoff ? <li><b>Despedida típica:</b> "{String(p.signoff)}"</li> : null}
+                        </ul>
+                      );
+                    })()}
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   {variants.map((v) => (
                     <button

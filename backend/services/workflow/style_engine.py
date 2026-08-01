@@ -19,16 +19,17 @@ Flow:
 from __future__ import annotations
 
 import asyncio
+import difflib
 import json
 import logging
 import re
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.ai.aion_client import AIONBrainClient
 from backend.config import settings
-from backend.models.entities import Email, EmailStatus, StyleProfile
+from backend.models.entities import Email, EmailStatus, StyleFeedback, StyleProfile
 
 logger = logging.getLogger("chatita_mail.style")
 
@@ -125,7 +126,17 @@ class StyleLearningEngine:
             .limit(limit)
         )
         rows = (await session.scalars(stmt)).all()
-        bodies = [e.body_text for e in rows]
+
+        # T3.3 — prioritize Manny's *edited* drafts (ground-truth voice) first.
+        fb_rows = (
+            await session.scalars(
+                select(StyleFeedback)
+                .where(StyleFeedback.user_key == user_key, StyleFeedback.edited.is_(True))
+                .order_by(StyleFeedback.created_at.desc())
+                .limit(20)
+            )
+        ).all()
+        bodies = [f.final_body for f in fb_rows] + [e.body_text for e in rows]
 
         # Cold start: too few persisted SENT emails → seed from the Gmail SENT label.
         if len([b for b in bodies if (b or "").strip()]) < _MIN_DB_SAMPLES:
@@ -199,6 +210,88 @@ class StyleLearningEngine:
             select(StyleProfile).where(StyleProfile.user_key == user_key)
         )
 
+    # ── T3.3 feedback loop ──────────────────────────────────
+    @staticmethod
+    def _edit_ratio(ai_body: str | None, final_body: str) -> float:
+        """0.0 = accepted verbatim, 1.0 = fully rewritten (char-level diff)."""
+        if not ai_body:
+            return 1.0  # no AI baseline → treat as fully authored
+        ratio = difflib.SequenceMatcher(None, ai_body.strip(), final_body.strip()).ratio()
+        return round(1.0 - ratio, 3)
+
+    async def record_feedback(
+        self,
+        session: AsyncSession,
+        final_body: str,
+        ai_body: str | None = None,
+        style: str | None = None,
+        email_id: str | None = None,
+        user_key: str | None = None,
+        relearn_threshold: int = 5,
+    ) -> dict:
+        """Persist how Manny edited an AI draft; relearn once enough edits accrue."""
+        user_key = user_key or self.default_user_key()
+        edit_ratio = self._edit_ratio(ai_body, final_body)
+        edited = edit_ratio > 0.05  # >5% char change counts as a real edit
+        row = StyleFeedback(
+            user_key=user_key,
+            email_id=email_id,
+            style=style,
+            ai_body=ai_body,
+            final_body=final_body,
+            edited=edited,
+            edit_ratio=edit_ratio,
+        )
+        session.add(row)
+        await session.flush()
+
+        # Adapt the profile once we have >= threshold *edited* samples (cheap trigger).
+        relearned = False
+        edited_count = await session.scalar(
+            select(func.count(StyleFeedback.id)).where(
+                StyleFeedback.user_key == user_key, StyleFeedback.edited.is_(True)
+            )
+        ) or 0
+        if edited and edited_count % relearn_threshold == 0:
+            try:
+                await self.learn(session, user_key=user_key)
+                relearned = True
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("relearn after feedback failed: %s", exc)
+
+        return {
+            "id": row.id,
+            "edited": edited,
+            "edit_ratio": edit_ratio,
+            "edited_count": edited_count,
+            "relearned": relearned,
+        }
+
+    async def edit_rate(self, session: AsyncSession, user_key: str | None = None) -> dict:
+        """Acceptance metrics powering the trust score (T3.3/T3.4)."""
+        user_key = user_key or self.default_user_key()
+        total = await session.scalar(
+            select(func.count(StyleFeedback.id)).where(StyleFeedback.user_key == user_key)
+        ) or 0
+        edited = await session.scalar(
+            select(func.count(StyleFeedback.id)).where(
+                StyleFeedback.user_key == user_key, StyleFeedback.edited.is_(True)
+            )
+        ) or 0
+        avg_ratio = await session.scalar(
+            select(func.avg(StyleFeedback.edit_ratio)).where(
+                StyleFeedback.user_key == user_key
+            )
+        )
+        accepted = total - edited
+        return {
+            "total_drafts": total,
+            "accepted": accepted,
+            "edited": edited,
+            "acceptance_rate": round(accepted / total, 3) if total else 0.0,
+            "avg_edit_ratio": round(float(avg_ratio), 3) if avg_ratio is not None else 0.0,
+        }
+
     # ── helpers ─────────────────────────────────────────────
     @staticmethod
     def _normalize(data: dict) -> dict:
@@ -232,27 +325,42 @@ class StyleLearningEngine:
         return row
 
     @staticmethod
-    def directive(profile: dict | None) -> str:
-        """Compact NL instruction to steer the reply prompt toward Manny's style."""
+    def directive(profile: dict | None, target_lang: str | None = None) -> str:
+        """Compact NL instruction to steer the reply prompt toward Manny's style.
+
+        `target_lang` (es|en) is the DETECTED language of the email being answered.
+        When it differs from the profile's primary language, we drop the
+        language-bound cues (greeting/signoff/phrases) so they don't force the
+        reply back into Spanish — tone/formality/length are language-agnostic and
+        kept. Language itself is enforced separately by `_lang_directive`.
+        """
         if not profile:
             return ""
         p = profile
+        prof_lang = str(p.get("language_primary", "es")).lower()[:2]
+        same_lang = target_lang is None or target_lang == prof_lang
         parts = [
-            f"Escribe imitando el estilo de Manuel Cadena. Idioma: {p.get('language_primary', 'es')}.",
+            "Escribe imitando el estilo de Manuel Cadena (voz, tono y estructura).",
             f"Registro: {p.get('formality', 'neutral')}.",
         ]
         tones = p.get("tone_descriptors") or []
         if tones:
             parts.append(f"Tono: {', '.join(tones)}.")
-        if p.get("greeting"):
-            parts.append(f"Saludo típico: \"{p['greeting']}\".")
-        if p.get("signoff"):
-            parts.append(f"Despedida típica: \"{p['signoff']}\".")
+        if same_lang:
+            if p.get("greeting"):
+                parts.append(f"Saludo típico: \"{p['greeting']}\".")
+            if p.get("signoff"):
+                parts.append(f"Despedida típica: \"{p['signoff']}\".")
+        else:
+            parts.append(
+                "Adapta el saludo y la despedida al idioma del correo (no uses "
+                "plantillas en otro idioma)."
+            )
         parts.append(f"Longitud: {p.get('avg_email_length', 'medium')}.")
         emoji = p.get("emoji_usage", "none")
         parts.append("Sin emojis." if emoji == "none" else f"Emojis: {emoji}.")
         phrases = p.get("common_phrases") or []
-        if phrases:
+        if phrases and same_lang:
             parts.append(f"Puede usar frases suyas como: {'; '.join(phrases[:4])}.")
         if p.get("bullet_preference"):
             parts.append("Prefiere listas con viñetas cuando aplica.")

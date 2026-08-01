@@ -17,6 +17,7 @@ from backend.models.db import get_session
 from backend.models.entities import Commitment, Email, Task
 from backend.models.schemas import CommitmentOut, TaskOut, TaskStatusIn
 from backend.services.workflow import Composer, StyleLearningEngine, TaskExtractor
+from backend.services.workflow.composer import detect_language
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/api", tags=["workflow"])
@@ -24,6 +25,12 @@ router = APIRouter(prefix="/api", tags=["workflow"])
 _extractor = TaskExtractor()
 _composer = Composer()
 _style = StyleLearningEngine()
+
+
+def _email_lang(email) -> str:
+    """Detected language of an email (subject + body), shared by draft routes."""
+    text = f"{email.subject or ''}\n{email.body_text or email.snippet or ''}"
+    return detect_language(text)
 
 
 class DraftReplyIn(BaseModel):
@@ -154,9 +161,10 @@ async def draft_reply(
     """Generate an editable reply draft in Manny's learned voice."""
     email = await _load_email(session, email_id)
     payload = payload or DraftReplyIn()
-    # Personalize with the learned style profile if one exists (Phase 3 / T3.1).
+    # Personalize with the learned style profile if one exists (Phase 3 / T3.1),
+    # adapting language-bound cues to the email's detected language (T3.5).
     sp = await _style.get_profile(session)
-    directive = _style.directive(sp.profile) if sp else None
+    directive = _style.directive(sp.profile, target_lang=_email_lang(email)) if sp else None
     r = await _composer.draft_reply(
         email,
         tone=payload.tone,
@@ -169,6 +177,7 @@ async def draft_reply(
         "body": r.body,
         "tone": r.tone,
         "source": r.source,
+        "language": r.language,
         "style_applied": bool(directive),
         "style_samples": sp.sample_size if sp else 0,
     }
@@ -181,7 +190,7 @@ async def draft_variants(
     """T3.2 — three styled reply options (Natural/Profesional/Breve) + XAI 'why'."""
     email = await _load_email(session, email_id)
     sp = await _style.get_profile(session)
-    directive = _style.directive(sp.profile) if sp else None
+    directive = _style.directive(sp.profile, target_lang=_email_lang(email)) if sp else None
     result = await _composer.draft_variants(email, style_directive=directive)
     return {
         "email_id": email_id,
@@ -204,6 +213,33 @@ async def learn_style(
         "sample_size": row.sample_size,
         "profile": row.profile,
     }
+
+
+class StyleFeedbackIn(BaseModel):
+    final_body: str
+    ai_body: str | None = None
+    style: str | None = None
+    email_id: str | None = None
+
+
+@router.post("/inbox/style/feedback")
+async def style_feedback(
+    payload: StyleFeedbackIn, session: AsyncSession = Depends(get_session)
+) -> dict:
+    """T3.3 — record how Manny edited an AI draft before sending; adapt profile."""
+    return await _style.record_feedback(
+        session,
+        final_body=payload.final_body,
+        ai_body=payload.ai_body,
+        style=payload.style,
+        email_id=payload.email_id,
+    )
+
+
+@router.get("/inbox/style/metrics")
+async def style_metrics(session: AsyncSession = Depends(get_session)) -> dict:
+    """T3.3/T3.4 — acceptance metrics (trust score inputs)."""
+    return await _style.edit_rate(session)
 
 
 @router.get("/inbox/style")

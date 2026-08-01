@@ -173,6 +173,7 @@ export interface ReplyDraft {
   body: string;
   tone: string;
   source: string;
+  language?: string;
 }
 
 export async function summarizeEmail(id: string): Promise<EmailSummary> {
@@ -206,12 +207,36 @@ export interface ReplyVariants {
   subject: string;
   variants: ReplyVariant[];
   source: string;
+  language?: string;
   style_applied: boolean;
   style_samples: number;
 }
 
 export async function draftVariants(id: string): Promise<ReplyVariants> {
   const { data } = await api.post<ReplyVariants>(`/inbox/emails/${id}/draft-variants`);
+  return data;
+}
+
+// ── Phase 3 (T3.3/T3.4): style profile + feedback loop ─────
+export interface StyleProfileOut {
+  user_key: string;
+  sample_size: number;
+  profile: Record<string, unknown> | null;
+  updated_at?: string;
+}
+
+export async function getStyleProfile(): Promise<StyleProfileOut> {
+  const { data } = await api.get<StyleProfileOut>(`/inbox/style`);
+  return data;
+}
+
+export async function recordStyleFeedback(payload: {
+  final_body: string;
+  ai_body?: string;
+  style?: string;
+  email_id?: string;
+}): Promise<{ edited: boolean; edit_ratio: number; relearned: boolean }> {
+  const { data } = await api.post(`/inbox/style/feedback`, payload);
   return data;
 }
 
