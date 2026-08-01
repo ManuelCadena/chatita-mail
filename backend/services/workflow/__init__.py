@@ -1,5 +1,12 @@
-"""Chatita Mail v3.0 — Phase 2 workflow automation package."""
+"""Chatita Mail v3.0 — Phase 2/3 workflow automation package."""
 from backend.services.workflow.composer import Composer, ReplyDraft, SummaryResult
+from backend.services.workflow.style_engine import StyleLearningEngine
 from backend.services.workflow.task_extractor import TaskExtractor
 
-__all__ = ["TaskExtractor", "Composer", "ReplyDraft", "SummaryResult"]
+__all__ = [
+    "TaskExtractor",
+    "Composer",
+    "ReplyDraft",
+    "SummaryResult",
+    "StyleLearningEngine",
+]

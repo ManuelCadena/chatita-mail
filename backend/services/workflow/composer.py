@@ -116,10 +116,19 @@ class Composer:
         return self._fallback_summary(email)
 
     async def draft_reply(
-        self, email: Email, tone: str = "professional", instructions: str | None = None
+        self,
+        email: Email,
+        tone: str = "professional",
+        instructions: str | None = None,
+        style_directive: str | None = None,
     ) -> ReplyDraft:
         tone = tone if tone in _VALID_TONES else "professional"
-        extra = f"Additional instruction from Manny: {instructions}" if instructions else ""
+        extra_lines = []
+        if style_directive:
+            extra_lines.append(style_directive)
+        if instructions:
+            extra_lines.append(f"Additional instruction from Manny: {instructions}")
+        extra = "\n".join(extra_lines)
         prompt = _REPLY_PROMPT.format(
             tone=tone,
             extra=extra,

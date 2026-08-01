@@ -16,13 +16,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.models.db import get_session
 from backend.models.entities import Commitment, Email, Task
 from backend.models.schemas import CommitmentOut, TaskOut, TaskStatusIn
-from backend.services.workflow import Composer, TaskExtractor
+from backend.services.workflow import Composer, StyleLearningEngine, TaskExtractor
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/api", tags=["workflow"])
 
 _extractor = TaskExtractor()
 _composer = Composer()
+_style = StyleLearningEngine()
 
 
 class DraftReplyIn(BaseModel):
@@ -150,14 +151,53 @@ async def draft_reply(
     payload: DraftReplyIn | None = None,
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    """Generate an editable reply draft in Manny's voice."""
+    """Generate an editable reply draft in Manny's learned voice."""
     email = await _load_email(session, email_id)
     payload = payload or DraftReplyIn()
-    r = await _composer.draft_reply(email, tone=payload.tone, instructions=payload.instructions)
+    # Personalize with the learned style profile if one exists (Phase 3 / T3.1).
+    sp = await _style.get_profile(session)
+    directive = _style.directive(sp.profile) if sp else None
+    r = await _composer.draft_reply(
+        email,
+        tone=payload.tone,
+        instructions=payload.instructions,
+        style_directive=directive,
+    )
     return {
         "email_id": email_id,
         "subject": r.subject,
         "body": r.body,
         "tone": r.tone,
         "source": r.source,
+        "style_applied": bool(directive),
+        "style_samples": sp.sample_size if sp else 0,
+    }
+
+
+# ── Phase 3 (T3.1): Style learning ──────────────────────────
+@router.post("/inbox/style/learn")
+async def learn_style(
+    limit: int = Query(100, ge=1, le=500),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Analyze SENT emails and (re)build Manny's writing-style profile."""
+    row = await _style.learn(session, limit=limit)
+    return {
+        "user_key": row.user_key,
+        "sample_size": row.sample_size,
+        "profile": row.profile,
+    }
+
+
+@router.get("/inbox/style")
+async def get_style(session: AsyncSession = Depends(get_session)) -> dict:
+    """Return the current learned style profile (or an empty shell if none)."""
+    row = await _style.get_profile(session)
+    if row is None:
+        return {"user_key": _style.default_user_key(), "sample_size": 0, "profile": None}
+    return {
+        "user_key": row.user_key,
+        "sample_size": row.sample_size,
+        "profile": row.profile,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
     }
