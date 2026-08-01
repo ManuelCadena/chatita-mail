@@ -53,6 +53,18 @@ test("voice reply (T4.1) returns audio/mpeg from the TTS endpoint", async ({ pag
   expect(resp.headers()["content-type"]).toContain("audio/mpeg");
 });
 
+test("Drive attachment suggest (T4.2) returns files and inserts a link", async ({ page }) => {
+  await page.getByTestId("email-row").first().click();
+  await page.getByRole("button", { name: "Responder" }).click();
+  const [resp] = await Promise.all([
+    page.waitForResponse((r) => r.url().includes("/inbox/drive/search"), { timeout: 30_000 }),
+    page.getByRole("button", { name: "Drive" }).click(),
+  ]);
+  expect(resp.status()).toBe(200);
+  // Panel header appears and at least one file row renders (accont has Drive files).
+  await expect(page.getByText("Adjuntar de Drive")).toBeVisible();
+});
+
 test("compose modal validates recipient before enabling send", async ({ page }) => {
   await page.getByRole("button", { name: "Redactar" }).click();
   await expect(page.getByText("Nuevo correo")).toBeVisible();

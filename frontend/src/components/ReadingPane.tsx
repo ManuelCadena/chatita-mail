@@ -42,8 +42,10 @@ import {
   unsubscribeEmail,
   updateTask,
   voiceTTS,
+  driveSearch,
   type EmailSummary,
   type ReplyVariant,
+  type DriveFile,
 } from "../api/client";
 import { useUI } from "../store";
 import { CategoryBadge, SecurityBadge } from "./badges";
@@ -225,6 +227,25 @@ export default function ReadingPane() {
     });
   };
 
+  // T4.2 — Drive attachment suggestions.
+  const [driveOpen, setDriveOpen] = useState(false);
+  const [driveResults, setDriveResults] = useState<DriveFile[] | null>(null);
+  const [driveQuery, setDriveQuery] = useState("");
+  const driveMut = useMutation({
+    mutationFn: (q: string) => driveSearch(q, 8),
+    onSuccess: (r) => setDriveResults(r.files),
+    onError: (e: unknown) => toast.error((e as Error).message),
+  });
+  const insertDriveLink = (f: DriveFile) => {
+    setCompose((prev) => {
+      const base = prev ?? emptyReplyState(data);
+      const line = `📎 ${f.name}: ${f.link}`;
+      const body = base.body ? `${base.body.replace(/\s+$/, "")}\n\n${line}` : line;
+      return { ...base, body };
+    });
+    toast.success("Enlace de Drive insertado");
+  };
+
   // T4.1 — play the composed reply aloud (ElevenLabs TTS via backend).
   const voiceRef = useRef<HTMLAudioElement | null>(null);
   const voiceMut = useMutation({
@@ -296,6 +317,9 @@ export default function ReadingPane() {
     setReplyLang(null);
     setAiDraft(null);
     setWhyOpen(false);
+    setDriveOpen(false);
+    setDriveResults(null);
+    setDriveQuery("");
   }, [selectedEmailId]);
 
   // Open any clicked in-email link OUTSIDE the Mail iframe so external sites
@@ -724,6 +748,52 @@ export default function ReadingPane() {
               </div>
             )}
 
+            {/* T4.2 — Drive attachment suggestions */}
+            {compose.mode !== "forward" && driveOpen && (
+              <div className="mt-3 rounded-lg border border-amber-100 bg-white p-2.5">
+                <div className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-600 mb-2">
+                  <Paperclip size={12} /> Adjuntar de Drive
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    value={driveQuery}
+                    onChange={(e) => setDriveQuery(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && driveMut.mutate(driveQuery)}
+                    placeholder="Buscar archivos en Drive…"
+                    className="flex-1 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm"
+                  />
+                  <button
+                    onClick={() => driveMut.mutate(driveQuery)}
+                    disabled={driveMut.isPending}
+                    className="rounded-md bg-amber-500 text-white text-xs px-3 py-1.5 hover:bg-amber-400 disabled:opacity-50"
+                  >
+                    {driveMut.isPending ? "…" : "Buscar"}
+                  </button>
+                </div>
+                {driveResults && (
+                  <div className="mt-2 max-h-56 overflow-y-auto divide-y divide-slate-100">
+                    {driveResults.length === 0 && (
+                      <div className="text-xs text-slate-400 py-2">Sin resultados.</div>
+                    )}
+                    {driveResults.map((f) => (
+                      <button
+                        key={f.id}
+                        onClick={() => insertDriveLink(f)}
+                        title={`Insertar enlace a ${f.name}`}
+                        className="w-full text-left flex items-center gap-2 py-1.5 hover:bg-amber-50 rounded px-1"
+                      >
+                        <span className="text-[9px] font-semibold uppercase text-amber-600 bg-amber-100 rounded px-1 py-0.5 shrink-0">
+                          {f.kind}
+                        </span>
+                        <span className="flex-1 truncate text-sm text-slate-700">{f.name}</span>
+                        <span className="text-[10px] text-indigo-500 shrink-0">+ insertar</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="mt-3 flex items-center gap-2 flex-wrap">
               <button
                 onClick={() => {
@@ -776,6 +846,28 @@ export default function ReadingPane() {
                   >
                     {voiceMut.isPending ? <Loader2 size={14} className="animate-spin" /> : <Volume2 size={14} />}
                     {voiceMut.isPending ? "…" : "Escuchar"}
+                  </button>
+                  <button
+                    onClick={() => {
+                      const next = !driveOpen;
+                      setDriveOpen(next);
+                      // Prefill the search with subject keywords on first open.
+                      if (next && driveResults === null) {
+                        const seed = (compose.subject || data.subject || "")
+                          .replace(/^re:\s*/i, "")
+                          .slice(0, 60);
+                        setDriveQuery(seed);
+                        driveMut.mutate(seed);
+                      }
+                    }}
+                    title="Sugerir archivos de Google Drive"
+                    className={`inline-flex items-center gap-1.5 rounded-md border text-xs px-2.5 py-1.5 ${
+                      driveOpen
+                        ? "border-amber-300 bg-amber-50 text-amber-700"
+                        : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                    }`}
+                  >
+                    <Paperclip size={14} /> Drive
                   </button>
                 </>
               )}

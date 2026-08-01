@@ -245,6 +245,27 @@ async def style_metrics(session: AsyncSession = Depends(get_session)) -> dict:
     return await _style.edit_rate(session)
 
 
+# ── Phase 4 (T4.2): Google Drive attachment suggestions ─────
+@router.get("/inbox/drive/search")
+async def drive_search(
+    q: str = Query("", description="Full-text query"),
+    limit: int = Query(8, ge=1, le=25),
+) -> dict:
+    """T4.2 — suggest Drive files to attach (read-only). Runs off the event loop."""
+    import asyncio
+
+    from backend.services.email.drive_connector import DriveConnector
+
+    conn = DriveConnector()
+    if not conn.enabled():
+        return {"enabled": False, "files": []}
+    try:
+        files = await asyncio.to_thread(conn.search, q, limit)
+        return {"enabled": True, "files": files}
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Drive error: {str(exc)[:200]}") from exc
+
+
 # ── Phase 4 (T4.1): Voice replies via ElevenLabs TTS ────────
 class TTSIn(BaseModel):
     text: str

@@ -251,6 +251,23 @@ export async function voiceTTS(text: string): Promise<Blob> {
   return data as Blob;
 }
 
+// ── Phase 4 (T4.2): Drive attachment suggestions ───────────
+export interface DriveFile {
+  id: string;
+  name: string;
+  mimeType: string;
+  kind: string;
+  link: string;
+  icon?: string;
+  modified?: string;
+  size?: number | null;
+}
+
+export async function driveSearch(q: string, limit = 8): Promise<{ enabled: boolean; files: DriveFile[] }> {
+  const { data } = await api.get(`/inbox/drive/search`, { params: { q, limit } });
+  return data;
+}
+
 // ── Send (reply / reply-all / forward / new) — gmail.send ──
 export interface SendResult {
   sent: boolean;
