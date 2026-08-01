@@ -240,6 +240,17 @@ export async function recordStyleFeedback(payload: {
   return data;
 }
 
+// ── Phase 4 (T4.1): Voice replies (ElevenLabs TTS) ─────────
+export async function voiceHealth(): Promise<{ enabled: boolean; voice_id: string | null }> {
+  const { data } = await api.get(`/voice/health`);
+  return data;
+}
+
+export async function voiceTTS(text: string): Promise<Blob> {
+  const { data } = await api.post(`/voice/tts`, { text }, { responseType: "blob" });
+  return data as Blob;
+}
+
 // ── Send (reply / reply-all / forward / new) — gmail.send ──
 export interface SendResult {
   sent: boolean;

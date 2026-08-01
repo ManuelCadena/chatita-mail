@@ -9,10 +9,13 @@ Surfaces AION-extracted actionable items so the user can act in <=5 min/day:
 """
 from __future__ import annotations
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.config import settings
 from backend.models.db import get_session
 from backend.models.entities import Commitment, Email, Task
 from backend.models.schemas import CommitmentOut, TaskOut, TaskStatusIn
@@ -240,6 +243,60 @@ async def style_feedback(
 async def style_metrics(session: AsyncSession = Depends(get_session)) -> dict:
     """T3.3/T3.4 — acceptance metrics (trust score inputs)."""
     return await _style.edit_rate(session)
+
+
+# ── Phase 4 (T4.1): Voice replies via ElevenLabs TTS ────────
+class TTSIn(BaseModel):
+    text: str
+    voice_id: str | None = None
+
+
+@router.get("/voice/health")
+async def voice_health() -> dict:
+    """Report whether the voice (TTS) feature is configured."""
+    return {
+        "enabled": bool(settings.elevenlabs_api_key and settings.elevenlabs_voice_id),
+        "voice_id": settings.elevenlabs_voice_id or None,
+        "model": settings.elevenlabs_model_id,
+    }
+
+
+@router.post("/voice/tts")
+async def voice_tts(payload: TTSIn) -> Response:
+    """T4.1 — synthesize reply text to speech (returns audio/mpeg)."""
+    if not (settings.elevenlabs_api_key and settings.elevenlabs_voice_id):
+        raise HTTPException(status_code=503, detail="Voice not configured")
+    text = (payload.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Empty text")
+    text = text[:5000]  # ElevenLabs per-request cap
+    voice_id = payload.voice_id or settings.elevenlabs_voice_id
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+    body = {
+        "text": text,
+        "model_id": settings.elevenlabs_model_id,
+        "voice_settings": {"stability": 0.5, "similarity_boost": 0.75},
+    }
+    headers = {
+        "xi-api-key": settings.elevenlabs_api_key,
+        "accept": "audio/mpeg",
+        "content-type": "application/json",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(url, json=body, headers=headers)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"TTS upstream error: {exc}") from exc
+    if resp.status_code != 200:
+        raise HTTPException(
+            status_code=502,
+            detail=f"ElevenLabs {resp.status_code}: {resp.text[:200]}",
+        )
+    return Response(
+        content=resp.content,
+        media_type="audio/mpeg",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @router.get("/inbox/style")

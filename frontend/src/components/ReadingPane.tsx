@@ -1,5 +1,5 @@
 // Chatita Mail v3.0 — right pane: full email view + actions + XAI + Phase-2 tasks
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import DOMPurify from "dompurify";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
@@ -23,6 +23,7 @@ import {
   X,
   Loader2,
   Layers,
+  Volume2,
 } from "lucide-react";
 import {
   draftReply,
@@ -40,6 +41,7 @@ import {
   summarizeEmail,
   unsubscribeEmail,
   updateTask,
+  voiceTTS,
   type EmailSummary,
   type ReplyVariant,
 } from "../api/client";
@@ -222,6 +224,21 @@ export default function ReadingPane() {
       return { ...base, body: v.body, subject: base.subject || v.subject };
     });
   };
+
+  // T4.1 — play the composed reply aloud (ElevenLabs TTS via backend).
+  const voiceRef = useRef<HTMLAudioElement | null>(null);
+  const voiceMut = useMutation({
+    mutationFn: () => voiceTTS(compose?.body?.trim() || ""),
+    onSuccess: (blob) => {
+      const url = URL.createObjectURL(blob);
+      voiceRef.current?.pause();
+      const audio = new Audio(url);
+      voiceRef.current = audio;
+      audio.onended = () => URL.revokeObjectURL(url);
+      void audio.play();
+    },
+    onError: (e: unknown) => toast.error((e as Error).message),
+  });
 
   const sendMut = useMutation({
     mutationFn: async () => {
@@ -744,6 +761,21 @@ export default function ReadingPane() {
                   >
                     {draftMut.isPending ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
                     {draftMut.isPending ? "…" : "Borrador"}
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (!compose.body.trim()) {
+                        toast.error("Escribe o genera un mensaje primero");
+                        return;
+                      }
+                      voiceMut.mutate();
+                    }}
+                    disabled={voiceMut.isPending}
+                    title="Escuchar el mensaje en voz (ElevenLabs)"
+                    className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white text-slate-500 text-xs px-2.5 py-1.5 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    {voiceMut.isPending ? <Loader2 size={14} className="animate-spin" /> : <Volume2 size={14} />}
+                    {voiceMut.isPending ? "…" : "Escuchar"}
                   </button>
                 </>
               )}

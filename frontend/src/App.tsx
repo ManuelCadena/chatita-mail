@@ -6,6 +6,7 @@ import ReadingPane from "./components/ReadingPane";
 import TasksView from "./components/TasksView";
 import Dashboard from "./components/Dashboard";
 import ComposeModal from "./components/ComposeModal";
+import AccessibilityMenu from "./components/AccessibilityMenu";
 import { useUI } from "./store";
 
 export default function App() {
@@ -83,6 +84,8 @@ export default function App() {
             <Filter size={14} />
             Unread
           </button>
+
+          <AccessibilityMenu />
 
           <span className="text-xs text-slate-400 hidden md:block">
             ≤5 min/day · AION Brain

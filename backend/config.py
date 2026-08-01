@@ -59,6 +59,12 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
 
+    # ── Voice replies (T4.1 — ElevenLabs TTS) ───────────────
+    # Key/voice live in the shared root .env; empty disables the voice endpoint.
+    elevenlabs_api_key: str = ""
+    elevenlabs_voice_id: str = ""
+    elevenlabs_model_id: str = "eleven_multilingual_v2"
+
     # ── Embeddings (semantic search / RAG) ──────────────────
     # BGE-M3 (1024-dim) via HuggingFace Inference Router. Matches the pgvector
     # column dimension declared in scripts/setup_db.py.

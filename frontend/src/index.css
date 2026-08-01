@@ -37,3 +37,45 @@ body {
 .email-html p {
   margin: 0.5rem 0;
 }
+
+/* ── T4.3 Accessibility mode (toggled via data-* on <html>) ────────────── */
+/* Dyslexia-friendly: readable fallback stack + generous spacing (Goodman 2022). */
+html[data-a11y-dyslexia="1"] body,
+html[data-a11y-dyslexia="1"] .email-html {
+  font-family: "Atkinson Hyperlegible", "Comic Sans MS", "Verdana", "Trebuchet MS",
+    -apple-system, sans-serif;
+  letter-spacing: 0.03em;
+  word-spacing: 0.12em;
+  line-height: 1.7;
+}
+/* Larger base text for low-vision users. */
+html[data-a11y-large="1"] {
+  font-size: 118%;
+}
+html[data-a11y-large="1"] body {
+  line-height: 1.65;
+}
+/* High contrast: darken text, strengthen borders, remove faint greys. */
+html[data-a11y-contrast="1"] body {
+  color: #000;
+  background: #fff;
+}
+html[data-a11y-contrast="1"] .text-slate-400,
+html[data-a11y-contrast="1"] .text-slate-500 {
+  color: #1e293b !important;
+}
+html[data-a11y-contrast="1"] .border-slate-100,
+html[data-a11y-contrast="1"] .border-slate-200 {
+  border-color: #475569 !important;
+}
+html[data-a11y-contrast="1"] a,
+html[data-a11y-contrast="1"] .email-html a {
+  color: #1d4ed8;
+  text-decoration: underline;
+}
+/* Respect OS reduced-motion when the user opts in. */
+html[data-a11y-motion="1"] * {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+}
