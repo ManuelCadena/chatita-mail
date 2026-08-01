@@ -97,6 +97,7 @@ export default function EmailList() {
           return (
             <button
               key={e.id}
+              data-testid="email-row"
               onClick={() => selectEmail(e.id)}
               className={`w-full text-left px-3 py-3 border-b border-slate-100 flex gap-3 transition ${
                 active ? "bg-slate-100" : "hover:bg-slate-50"

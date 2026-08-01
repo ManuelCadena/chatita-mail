@@ -38,6 +38,21 @@ test("accessibility mode toggles a data attribute on <html>", async ({ page }) =
   await expect(page.locator("html")).not.toHaveAttribute("data-a11y-dyslexia", "1");
 });
 
+test("voice reply (T4.1) returns audio/mpeg from the TTS endpoint", async ({ page }) => {
+  // Open a reply on the first email, type text, and press "Escuchar".
+  await page.getByTestId("email-row").first().click();
+  await page.getByRole("button", { name: "Responder" }).click();
+  await page.getByPlaceholder("Escribe tu mensaje…").fill(
+    "Hola, confirmo recibido y te respondo hoy mismo. Saludos, Manuel."
+  );
+  const [resp] = await Promise.all([
+    page.waitForResponse((r) => r.url().includes("/voice/tts"), { timeout: 30_000 }),
+    page.getByRole("button", { name: "Escuchar" }).click(),
+  ]);
+  expect(resp.status()).toBe(200);
+  expect(resp.headers()["content-type"]).toContain("audio/mpeg");
+});
+
 test("compose modal validates recipient before enabling send", async ({ page }) => {
   await page.getByRole("button", { name: "Redactar" }).click();
   await expect(page.getByText("Nuevo correo")).toBeVisible();
