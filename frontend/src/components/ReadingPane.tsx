@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import {
   draftReply,
+  draftVariants,
   extractTasks,
   getEmail,
   releaseFromQuarantine,
@@ -38,6 +39,7 @@ import {
   unsubscribeEmail,
   updateTask,
   type EmailSummary,
+  type ReplyVariant,
 } from "../api/client";
 import { useUI } from "../store";
 import { CategoryBadge, SecurityBadge } from "./badges";
@@ -157,9 +159,11 @@ export default function ReadingPane() {
 
   // Phase 2: composer state
   const [summary, setSummary] = useState<EmailSummary | null>(null);
-  const [tone, setTone] = useState("professional");
+  const [tone] = useState("professional");  // single-draft fallback tone
   const [similar, setSimilar] = useState<EmailListItem[] | null>(null);
   const [compose, setCompose] = useState<ComposeState | null>(null);
+  const [variants, setVariants] = useState<ReplyVariant[] | null>(null);
+  const [styleMeta, setStyleMeta] = useState<{ applied: boolean; samples: number } | null>(null);
 
   const similarMut = useMutation({
     mutationFn: () => similarEmails(selectedEmailId as string, 8),
@@ -182,6 +186,23 @@ export default function ReadingPane() {
       }),
     onError: (e: unknown) => toast.error((e as Error).message),
   });
+
+  // T3.2 — generate 3 styled options (Natural/Profesional/Breve) with XAI 'why'.
+  const variantsMut = useMutation({
+    mutationFn: () => draftVariants(selectedEmailId as string),
+    onSuccess: (r) => {
+      setVariants(r.variants);
+      setStyleMeta({ applied: r.style_applied, samples: r.style_samples });
+      setCompose((prev) => prev ?? emptyReplyState(data));
+    },
+    onError: (e: unknown) => toast.error((e as Error).message),
+  });
+
+  const applyVariant = (v: ReplyVariant) =>
+    setCompose((prev) => {
+      const base = prev ?? emptyReplyState(data);
+      return { ...base, body: v.body, subject: base.subject || v.subject };
+    });
 
   const sendMut = useMutation({
     mutationFn: async () => {
@@ -223,6 +244,8 @@ export default function ReadingPane() {
     setSummary(null);
     setSimilar(null);
     setCompose(null);
+    setVariants(null);
+    setStyleMeta(null);
   }, [selectedEmailId]);
 
   // Open any clicked in-email link OUTSIDE the Mail iframe so external sites
@@ -593,6 +616,33 @@ export default function ReadingPane() {
               </label>
             )}
 
+            {/* T3.2 — 3 opciones de estilo con explicación (XAI) */}
+            {compose.mode !== "forward" && variants && variants.length > 0 && (
+              <div className="mt-3 rounded-lg border border-indigo-100 bg-white p-2.5">
+                <div className="flex items-center gap-1.5 text-[11px] font-semibold text-indigo-600 mb-2">
+                  <Sparkles size={12} /> Opciones IA
+                  {styleMeta?.applied && (
+                    <span className="ml-1 rounded-full bg-indigo-100 text-indigo-700 px-1.5 py-0.5 text-[9px]">
+                      tu estilo · {styleMeta.samples} muestras
+                    </span>
+                  )}
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  {variants.map((v) => (
+                    <button
+                      key={v.style}
+                      onClick={() => applyVariant(v)}
+                      title={v.body}
+                      className="text-left rounded-md border border-slate-200 bg-slate-50 hover:border-indigo-300 hover:bg-indigo-50 px-2.5 py-2 transition"
+                    >
+                      <div className="text-xs font-semibold text-slate-700">{v.label}</div>
+                      {v.why && <div className="text-[10px] text-slate-500 mt-0.5 leading-snug">{v.why}</div>}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="mt-3 flex items-center gap-2 flex-wrap">
               <button
                 onClick={() => {
@@ -614,22 +664,22 @@ export default function ReadingPane() {
 
               {compose.mode !== "forward" && (
                 <>
-                  <select
-                    value={tone}
-                    onChange={(e) => setTone(e.target.value)}
-                    className="text-xs rounded-md border border-slate-200 bg-white px-2 py-1.5"
+                  <button
+                    onClick={() => variantsMut.mutate()}
+                    disabled={variantsMut.isPending}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-indigo-200 bg-white text-indigo-600 text-xs px-3 py-1.5 hover:bg-indigo-50 disabled:opacity-50"
                   >
-                    {["professional", "friendly", "brief", "formal", "warm"].map((t) => (
-                      <option key={t} value={t}>{t}</option>
-                    ))}
-                  </select>
+                    {variantsMut.isPending ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                    {variantsMut.isPending ? "Generando…" : "Generar opciones (IA)"}
+                  </button>
                   <button
                     onClick={() => draftMut.mutate()}
                     disabled={draftMut.isPending}
-                    className="inline-flex items-center gap-1.5 rounded-md border border-indigo-200 bg-white text-indigo-600 text-xs px-3 py-1.5 hover:bg-indigo-50 disabled:opacity-50"
+                    title="Un solo borrador rápido"
+                    className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white text-slate-500 text-xs px-2.5 py-1.5 hover:bg-slate-50 disabled:opacity-50"
                   >
                     {draftMut.isPending ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-                    {draftMut.isPending ? "Generando…" : "Generar con IA"}
+                    {draftMut.isPending ? "…" : "Borrador"}
                   </button>
                 </>
               )}

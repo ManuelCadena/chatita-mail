@@ -173,6 +173,29 @@ export async function draftReply(
   return data;
 }
 
+// ── Phase 3 (T3.2): multi-style reply variants + XAI ───────
+export interface ReplyVariant {
+  style: string;
+  label: string;
+  subject: string;
+  body: string;
+  why: string;
+}
+
+export interface ReplyVariants {
+  email_id: string;
+  subject: string;
+  variants: ReplyVariant[];
+  source: string;
+  style_applied: boolean;
+  style_samples: number;
+}
+
+export async function draftVariants(id: string): Promise<ReplyVariants> {
+  const { data } = await api.post<ReplyVariants>(`/inbox/emails/${id}/draft-variants`);
+  return data;
+}
+
 // ── Send (reply / reply-all / forward / new) — gmail.send ──
 export interface SendResult {
   sent: boolean;

@@ -51,6 +51,32 @@ BODY:
 
 _VALID_TONES = {"professional", "friendly", "brief", "formal", "warm"}
 
+# T3.2 — multi-style reply variants (Liu 2022: offer options + explain why).
+_VARIANTS_PROMPT = """You are Manny (Manuel Cadena) drafting replies to the email below.
+Produce THREE alternative replies, each in a different style, matching the email's
+language (Spanish or English). Do NOT invent facts or commitments; use [brackets]
+for anything Manny must fill in.
+{style}
+Styles (use exactly these keys):
+  - "natural": Manny's authentic everyday voice — warm, personal, first person.
+  - "professional": polished and businesslike, complete and courteous.
+  - "brief": 2-3 sentences max, direct and to the point.
+
+For each, add a "why" field: one short sentence (same language) explaining when this
+option is best. Return ONLY valid minified JSON, no markdown, exactly:
+{{"subject":"Re: ...","variants":[\
+{{"style":"natural","body":"...","why":"..."}},\
+{{"style":"professional","body":"...","why":"..."}},\
+{{"style":"brief","body":"...","why":"..."}}]}}
+
+FROM: {sender}
+SUBJECT: {subject}
+BODY:
+{body}
+"""
+
+_VARIANT_LABELS = {"natural": "Natural", "professional": "Profesional", "brief": "Breve"}
+
 
 @dataclass
 class SummaryResult:
@@ -152,6 +178,61 @@ class Composer:
         except Exception as exc:  # noqa: BLE001
             logger.warning("draft_reply AION failed: %s", exc)
         return self._fallback_reply(email, tone)
+
+    async def draft_variants(
+        self, email: Email, style_directive: str | None = None
+    ) -> dict:
+        """T3.2 — three styled reply options (Natural/Profesional/Breve) + XAI 'why'."""
+        style = style_directive or ""
+        prompt = _VARIANTS_PROMPT.format(
+            style=style,
+            sender=email.from_name or email.from_address,
+            subject=email.subject or "(no subject)",
+            body=self._body_for(email),
+        )
+        subject = self._re_subject(email.subject)
+        try:
+            resp = await self.aion.orchestrate(prompt, task_type="medium", priority="P2")
+            data = _parse_json_block(resp.get("text", "")) if resp.get("ok", True) else None
+            if data and isinstance(data.get("variants"), list) and data["variants"]:
+                subj = str(data.get("subject") or "").strip() or subject
+                variants = []
+                for v in data["variants"]:
+                    key = str(v.get("style") or "").strip().lower()
+                    body = str(v.get("body") or "").strip()
+                    if not body:
+                        continue
+                    variants.append(
+                        {
+                            "style": key,
+                            "label": _VARIANT_LABELS.get(key, key.title() or "Opción"),
+                            "subject": subj,
+                            "body": body,
+                            "why": str(v.get("why") or "").strip(),
+                        }
+                    )
+                if variants:
+                    return {"subject": subj, "variants": variants, "source": "llm"}
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("draft_variants AION failed: %s", exc)
+        return self._fallback_variants(email, subject)
+
+    def _fallback_variants(self, email: Email, subject: str) -> dict:
+        base = self._fallback_reply(email, "professional").body
+        greeting = (email.from_name or "").split(" ")[0] if email.from_name else ""
+        brief = (
+            f"Hola{(' ' + greeting) if greeting else ''}, gracias por tu mensaje. "
+            "[Respuesta breve aquí]. Saludos, Manuel"
+        )
+        variants = [
+            {"style": "natural", "label": "Natural", "subject": subject, "body": base,
+             "why": "Cercano y en tu voz habitual."},
+            {"style": "professional", "label": "Profesional", "subject": subject, "body": base,
+             "why": "Formal y completo para contextos de negocio."},
+            {"style": "brief", "label": "Breve", "subject": subject, "body": brief,
+             "why": "Rápido y directo cuando hay poco tiempo."},
+        ]
+        return {"subject": subject, "variants": variants, "source": "fallback"}
 
     # ── fallbacks ───────────────────────────────────────────
     @staticmethod

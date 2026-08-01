@@ -174,6 +174,23 @@ async def draft_reply(
     }
 
 
+@router.post("/inbox/emails/{email_id}/draft-variants")
+async def draft_variants(
+    email_id: str, session: AsyncSession = Depends(get_session)
+) -> dict:
+    """T3.2 — three styled reply options (Natural/Profesional/Breve) + XAI 'why'."""
+    email = await _load_email(session, email_id)
+    sp = await _style.get_profile(session)
+    directive = _style.directive(sp.profile) if sp else None
+    result = await _composer.draft_variants(email, style_directive=directive)
+    return {
+        "email_id": email_id,
+        **result,
+        "style_applied": bool(directive),
+        "style_samples": sp.sample_size if sp else 0,
+    }
+
+
 # ── Phase 3 (T3.1): Style learning ──────────────────────────
 @router.post("/inbox/style/learn")
 async def learn_style(
