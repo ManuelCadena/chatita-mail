@@ -14,7 +14,7 @@
 | **Motor AI** | AION Brain v3.2 vía **MCP** (ya publicado) |
 | **Repo** | https://github.com/ManuelCadena/chatita-mail |
 | **Autor** | Manuel Cadena |
-| **Última actualización** | 25-Jul-2026 16:11 (UTC-06:00) |
+| **Última actualización** | 31-Jul-2026 18:33 (UTC-07:00) — Compose & Send completo (reply/reply-all/forward/redactar) + persistencia SENT + carpeta Enviados |
 | **Fase actual** | 🟢 **PROD + INGESTA COMPLETA + 100% TRIAGED** — https://chatita.ai/mail/. 40,275 emails (Gmail 30,157 + iCloud 10,118), **0 sin clasificar (100% triaged)**. Timers activos: `chatita-mail-sync.timer` (Gmail incremental c/5min) + `chatita-mail-icloud.timer` (iCloud SINCE c/10min), ambos finalizando OK. Backend HTTP 200 (uvicorn :8000). Categorías: MEDIUM 28,622 · NOISE 11,210 · SPAM 372 · IMPORTANT 37 · LOW 30 · CRITICAL 4. 33 tareas / 8 compromisos abiertos · 17,418 min ahorrados. Pendiente: Fase 3 personalización de estilo |
 | **Meta usuario** | ≤5 min/día en email · 100% importantes atendidos · 0% spam |
 
@@ -495,6 +495,8 @@ Email entrante
 | 23-Jul-2026 02:40 | Fix conector Gmail: body_html se extraía pero se descartaba → ahora persiste (gmail_connector+sync); aion_client._normalize robusto a múltiples shapes + detección de error | HECHO VERIFICADO | re-sync: 20/59 emails con HTML real; UI renderiza HTML |
 | 23-Jul-2026 21:30 | INGESTA ROBUSTA + FULL SYNC: gmail_connector (paginación pageToken, get_profile_history_id, history.list delta + HistoryExpiredError, fetch_normalized); sync.py full_sync (batched/resumable/dedup) + sync_incremental (historyId, bootstrap, guard sync_status=running); 6 rutas nuevas (/sync/gmail/full, /incremental, /sync/icloud, /icloud/health, /sync/status, /triage/pending con BackgroundTasks); EmailAccount +last_history_id +sync_status; scripts/backfill_gmail.py resumable | DEPLOY-VERIFICADO | Backfill prod: listed=29831 created=29821 failed=0 (1645s); systemd timer chatita-mail-sync.timer c/5min fired→delta 9861751→9861858 added=1 SPAM auto-archived (llm); /sync/status total=29849 hist=9861858; incremental manual added=0 up-to-date; icloud/health graceful (not configured) |
 | 23-Jul-2026 02:40 | UI OVERHAUL v3 (React): layout 3 paneles — Sidebar (folders+counts+sync+time-saved), EmailList (avatars/badges/unread/search), ReadingPane (HTML sanitizado DOMPurify+toolbar+XAI+tasks), TasksView, header con search+unread | BUILD-VERIFICADO + E2E | npm build exit 0 (1994 mods); Playwright :5173/mail: sidebar counts, lista 25 emails reales, reading pane con body HTML + panel XAI + mark-read; 0 errores consola |
+| 31-Jul-2026 18:20 | COMPOSE & SEND: scope `gmail.send` + `send_message`/`get_headers`/`get_attachment_bytes`; rutas `/inbox/emails/{id}/reply`, `/forward`, `/inbox/compose` (threading In-Reply-To/References, adjuntos); composer en ReadingPane (responder/resp.todos/reenviar + draft IA + confirmación); búsqueda semántica (BGE-M3 pgvector) + botón Similares | DEPLOY-VERIFICADO | commit previo; envío real self OK (Gmail msg id) |
+| 31-Jul-2026 18:33 | REDACTAR + PERSISTENCIA SENT: botón "Redactar" (Sidebar) → `ComposeModal` correo nuevo con confirmación; los 4 flujos de envío persisten `Email status=SENT`; carpeta "Enviados"; enum Python `SENT` + `ALTER TYPE emailstatus ADD VALUE 'SENT'` en Postgres prod | DEPLOY-VERIFICADO | git `b78b4ae`; py_compile+tsc exit 0; enum prod `{…,SENT}`; smoke `POST /inbox/compose`→`{"sent":true,"id":"19fb9349c98b797f"}`; `SENT rows: 1` en DB; `GET /mail-api/inbox/emails?status=SENT`→200; bundle público `index-BGRABe9Z.js` |
 
 ---
 
