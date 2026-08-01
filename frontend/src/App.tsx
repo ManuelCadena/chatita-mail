@@ -4,6 +4,7 @@ import Sidebar from "./components/Sidebar";
 import EmailList from "./components/EmailList";
 import ReadingPane from "./components/ReadingPane";
 import TasksView from "./components/TasksView";
+import Dashboard from "./components/Dashboard";
 import ComposeModal from "./components/ComposeModal";
 import { useUI } from "./store";
 
@@ -11,6 +12,7 @@ export default function App() {
   const { folderKey, search, setSearch, searchMode, setSearchMode, unreadOnly, toggleUnreadOnly } =
     useUI();
   const isWorkflow = folderKey === "tasks" || folderKey === "commitments";
+  const isDashboard = folderKey === "dashboard";
   const meaning = searchMode === "meaning";
 
   return (
@@ -89,7 +91,9 @@ export default function App() {
 
         {/* Panes */}
         <div className="flex-1 flex overflow-hidden">
-          {isWorkflow ? (
+          {isDashboard ? (
+            <Dashboard />
+          ) : isWorkflow ? (
             <TasksView mode={folderKey as "tasks" | "commitments"} />
           ) : (
             <>

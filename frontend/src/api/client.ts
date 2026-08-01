@@ -56,6 +56,25 @@ export async function similarEmails(id: string, limit = 10): Promise<EmailListIt
   return data;
 }
 
+export interface Analytics {
+  total: number;
+  received: number;
+  sent: number;
+  auto_handled: number;
+  time_saved_minutes: number;
+  time_saved_hours: number;
+  actionable: number;
+  reply_rate: number;
+  top_senders: { sender: string; count: number }[];
+  volume_by_day: { date: string; count: number }[];
+  window_days: number;
+}
+
+export async function getAnalytics(days = 14): Promise<Analytics> {
+  const { data } = await api.get<Analytics>(`/inbox/analytics`, { params: { days } });
+  return data;
+}
+
 export async function getStats(): Promise<InboxStats> {
   const { data } = await api.get<InboxStats>("/inbox/stats");
   return data;

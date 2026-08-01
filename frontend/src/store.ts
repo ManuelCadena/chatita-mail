@@ -15,6 +15,7 @@ export interface FolderDef {
 
 export const FOLDERS: FolderDef[] = [
   { key: "inbox", label: "Inbox", icon: "Inbox", status: "INBOX", group: "primary", countSource: "unread" },
+  { key: "dashboard", label: "Panel", icon: "BarChart3", group: "workflow" },
   { key: "tasks", label: "Tasks", icon: "CheckSquare", group: "workflow", countSource: "tasks" },
   { key: "commitments", label: "Commitments", icon: "Handshake", group: "workflow", countSource: "commitments" },
 

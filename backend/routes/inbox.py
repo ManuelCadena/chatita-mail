@@ -5,6 +5,8 @@ Endpoints to ingest, list, and read emails.
 """
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -337,6 +339,93 @@ async def inbox_stats(session: AsyncSession = Depends(get_session)) -> InboxStat
         open_commitments=open_commitments,
         time_saved_minutes=time_saved,
     )
+
+
+@router.get("/analytics")
+async def inbox_analytics(
+    days: int = Query(14, ge=1, le=90),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Dashboard metrics: time saved, throughput, reply rate, top senders, volume."""
+    total = await session.scalar(select(func.count(Email.id))) or 0
+    sent = (
+        await session.scalar(
+            select(func.count(Email.id)).where(Email.status == EmailStatus.SENT)
+        )
+        or 0
+    )
+    received = max(total - sent, 0)
+
+    # Auto-handled (noise/quarantine/spam) → minutes saved (mirrors /stats).
+    auto_handled = (
+        await session.scalar(
+            select(func.count(Email.id)).where(
+                Email.status.in_(
+                    [EmailStatus.ARCHIVED, EmailStatus.BLOCKED, EmailStatus.QUARANTINED]
+                )
+            )
+        )
+        or 0
+    )
+    time_saved_minutes = int(auto_handled * _MINUTES_SAVED_PER_EMAIL)
+
+    # Actionable inbound = Critical + Important (needing a human reply).
+    actionable = (
+        await session.scalar(
+            select(func.count(Classification.id)).where(
+                Classification.category.in_(
+                    [EmailCategory.CRITICAL, EmailCategory.IMPORTANT]
+                )
+            )
+        )
+        or 0
+    )
+    reply_rate = round(sent / actionable, 3) if actionable else 0.0
+
+    # Top senders (inbound only), by address.
+    top_senders = [
+        {"sender": addr, "count": cnt}
+        for addr, cnt in (
+            await session.execute(
+                select(Email.from_address, func.count(Email.id))
+                .where(Email.status != EmailStatus.SENT)
+                .group_by(Email.from_address)
+                .order_by(func.count(Email.id).desc())
+                .limit(10)
+            )
+        ).all()
+        if addr
+    ]
+
+    # Daily inbound volume for the last `days` days.
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    day = func.date(Email.received_at)
+    volume_by_day = [
+        {"date": str(d), "count": cnt}
+        for d, cnt in (
+            await session.execute(
+                select(day, func.count(Email.id))
+                .where(Email.received_at >= since, Email.status != EmailStatus.SENT)
+                .group_by(day)
+                .order_by(day.asc())
+            )
+        ).all()
+        if d is not None
+    ]
+
+    return {
+        "total": total,
+        "received": received,
+        "sent": sent,
+        "auto_handled": auto_handled,
+        "time_saved_minutes": time_saved_minutes,
+        "time_saved_hours": round(time_saved_minutes / 60, 1),
+        "actionable": actionable,
+        "reply_rate": reply_rate,
+        "top_senders": top_senders,
+        "volume_by_day": volume_by_day,
+        "window_days": days,
+    }
 
 
 @router.get("/emails/{email_id}")
