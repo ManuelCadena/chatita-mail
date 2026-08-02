@@ -24,6 +24,9 @@ import {
   Loader2,
   Layers,
   Volume2,
+  CalendarClock,
+  FilePlus,
+  ExternalLink,
 } from "lucide-react";
 import {
   draftReply,
@@ -43,9 +46,14 @@ import {
   updateTask,
   voiceTTS,
   driveSearch,
+  detectMeeting,
+  createCalendarEvent,
+  docDraft,
+  createDriveDoc,
   type EmailSummary,
   type ReplyVariant,
   type DriveFile,
+  type MeetingDetection,
 } from "../api/client";
 import { useUI } from "../store";
 import { CategoryBadge, SecurityBadge } from "./badges";
@@ -246,6 +254,57 @@ export default function ReadingPane() {
     toast.success("Enlace de Drive insertado");
   };
 
+  // T2.4 — meeting detection + scheduling.
+  const [meeting, setMeeting] = useState<MeetingDetection | null>(null);
+  const [meetingSlot, setMeetingSlot] = useState<string | null>(null);
+  const [sendInvites, setSendInvites] = useState(false);
+  const meetingMut = useMutation({
+    mutationFn: () => detectMeeting(selectedEmailId as string),
+    onSuccess: (r) => {
+      setMeeting(r);
+      setMeetingSlot(r.slots[0]?.start ?? null);
+      if (!r.is_meeting_request) toast("No parece una solicitud de reunión", { icon: "🤔" });
+    },
+    onError: (e: unknown) => toast.error((e as Error).message),
+  });
+  const createEventMut = useMutation({
+    mutationFn: () => {
+      const slot = meeting!.slots.find((s) => s.start === meetingSlot);
+      return createCalendarEvent({
+        summary: meeting!.topic,
+        start: slot!.start,
+        end: slot!.end,
+        duration_min: meeting!.duration_minutes,
+        description: `Agendado desde Chatita Mail · ${data?.subject ?? ""}`,
+        attendees: meeting!.attendees,
+        send_invites: sendInvites,
+      });
+    },
+    onSuccess: (r) => {
+      toast.success(r.event.invites_sent ? "Evento creado + invitación enviada" : "Evento creado en tu calendario");
+      window.open(r.event.link, "_blank", "noopener");
+      setMeeting(null);
+    },
+    onError: (e: unknown) => toast.error((e as Error).message),
+  });
+
+  // T2.6 — document generation to Drive.
+  const [doc, setDoc] = useState<{ title: string; content: string } | null>(null);
+  const docMut = useMutation({
+    mutationFn: () => docDraft(selectedEmailId as string),
+    onSuccess: (r) => setDoc({ title: r.title, content: r.content }),
+    onError: (e: unknown) => toast.error((e as Error).message),
+  });
+  const createDocMut = useMutation({
+    mutationFn: () => createDriveDoc(doc!.title, doc!.content),
+    onSuccess: (r) => {
+      toast.success("Documento creado en Drive");
+      window.open(r.doc.link, "_blank", "noopener");
+      setDoc(null);
+    },
+    onError: (e: unknown) => toast.error((e as Error).message),
+  });
+
   // T4.1 — play the composed reply aloud (ElevenLabs TTS via backend).
   const voiceRef = useRef<HTMLAudioElement | null>(null);
   const voiceMut = useMutation({
@@ -320,6 +379,10 @@ export default function ReadingPane() {
     setDriveOpen(false);
     setDriveResults(null);
     setDriveQuery("");
+    setMeeting(null);
+    setMeetingSlot(null);
+    setSendInvites(false);
+    setDoc(null);
   }, [selectedEmailId]);
 
   // Open any clicked in-email link OUTSIDE the Mail iframe so external sites
@@ -424,6 +487,18 @@ export default function ReadingPane() {
           onClick={() => similarMut.mutate()}
           disabled={similarMut.isPending}
         />
+        <ToolbarBtn
+          icon={meetingMut.isPending ? <Loader2 size={16} className="animate-spin" /> : <CalendarClock size={16} />}
+          label={meetingMut.isPending ? "Analizando…" : "Reunión"}
+          onClick={() => meetingMut.mutate()}
+          disabled={meetingMut.isPending}
+        />
+        <ToolbarBtn
+          icon={docMut.isPending ? <Loader2 size={16} className="animate-spin" /> : <FilePlus size={16} />}
+          label={docMut.isPending ? "Redactando…" : "Doc"}
+          onClick={() => docMut.mutate()}
+          disabled={docMut.isPending}
+        />
       </div>
 
       {/* Scroll body */}
@@ -460,6 +535,97 @@ export default function ReadingPane() {
                 <b>Next:</b> {summary.suggested_action}
               </p>
             )}
+          </Panel>
+        )}
+
+        {/* T2.4 — Meeting scheduling */}
+        {meeting && (
+          <Panel icon={<CalendarClock size={14} />} tone="indigo" title="Agendar reunión">
+            {!meeting.is_meeting_request && (
+              <p className="text-sm text-slate-600 mb-2">
+                AION no detectó una solicitud de reunión. Puedes agendar igualmente eligiendo un horario.
+              </p>
+            )}
+            <div className="text-sm text-slate-800 mb-1">
+              <b>{meeting.topic}</b> · {meeting.duration_minutes} min
+            </div>
+            <div className="text-xs text-slate-500 mb-2">
+              Invitados: {meeting.attendees.join(", ") || "—"}
+            </div>
+            {meeting.slots.length > 0 ? (
+              <div className="space-y-1 mb-3">
+                {meeting.slots.map((s) => (
+                  <label key={s.start} className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="slot"
+                      checked={meetingSlot === s.start}
+                      onChange={() => setMeetingSlot(s.start)}
+                    />
+                    {s.label}
+                  </label>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-rose-500 mb-2">Sin horarios libres en los próximos 10 días.</p>
+            )}
+            <label className="flex items-center gap-2 text-xs text-slate-600 mb-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={sendInvites}
+                onChange={(e) => setSendInvites(e.target.checked)}
+              />
+              Enviar invitación por email a los asistentes
+            </label>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => createEventMut.mutate()}
+                disabled={!meetingSlot || createEventMut.isPending}
+                className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+              >
+                {createEventMut.isPending ? <Loader2 size={14} className="animate-spin" /> : <CalendarClock size={14} />}
+                Crear evento
+              </button>
+              <button
+                onClick={() => setMeeting(null)}
+                className="rounded-md px-3 py-1.5 text-sm text-slate-500 hover:text-slate-700"
+              >
+                Cancelar
+              </button>
+            </div>
+          </Panel>
+        )}
+
+        {/* T2.6 — Document generation to Drive */}
+        {doc && (
+          <Panel icon={<FilePlus size={14} />} tone="slate" title="Borrador de documento (Drive)">
+            <input
+              value={doc.title}
+              onChange={(e) => setDoc({ ...doc, title: e.target.value })}
+              className="w-full rounded-md border border-slate-200 px-2 py-1 text-sm font-medium mb-2"
+            />
+            <textarea
+              value={doc.content}
+              onChange={(e) => setDoc({ ...doc, content: e.target.value })}
+              rows={10}
+              className="w-full rounded-md border border-slate-200 px-2 py-1 text-sm font-mono mb-3"
+            />
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => createDocMut.mutate()}
+                disabled={createDocMut.isPending || !doc.content.trim()}
+                className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+              >
+                {createDocMut.isPending ? <Loader2 size={14} className="animate-spin" /> : <ExternalLink size={14} />}
+                Crear en Drive
+              </button>
+              <button
+                onClick={() => setDoc(null)}
+                className="rounded-md px-3 py-1.5 text-sm text-slate-500 hover:text-slate-700"
+              >
+                Descartar
+              </button>
+            </div>
           </Panel>
         )}
 
@@ -914,6 +1080,7 @@ const TONES: Record<string, string> = {
   slate: "border-slate-200 bg-slate-50",
   amber: "border-amber-200 bg-amber-50",
   emerald: "border-emerald-200 bg-emerald-50",
+  indigo: "border-indigo-200 bg-indigo-50",
 };
 
 function Panel({

@@ -268,6 +268,88 @@ export async function driveSearch(q: string, limit = 8): Promise<{ enabled: bool
   return data;
 }
 
+// ── Phase 2 (T2.2/T2.4): Calendar & meetings ───────────────
+export interface CalendarSlot {
+  start: string;
+  end: string;
+  label: string;
+}
+
+export interface MeetingDetection {
+  is_meeting_request: boolean;
+  topic: string;
+  duration_minutes: number;
+  attendees: string[];
+  urgency?: string | null;
+  slots: CalendarSlot[];
+}
+
+export async function detectMeeting(emailId: string): Promise<MeetingDetection> {
+  const { data } = await api.post(`/inbox/emails/${emailId}/meeting/detect`);
+  return data;
+}
+
+export interface CalendarEventResult {
+  created: boolean;
+  event: { id: string; link: string; start?: string; end?: string; invites_sent?: boolean };
+}
+
+export async function createCalendarEvent(payload: {
+  summary: string;
+  start: string;
+  end?: string;
+  duration_min?: number;
+  description?: string;
+  attendees?: string[];
+  send_invites?: boolean;
+}): Promise<CalendarEventResult> {
+  const { data } = await api.post(`/inbox/calendar/events`, payload);
+  return data;
+}
+
+// ── Phase 2 (T2.3): overdue commitments + follow-up ────────
+export interface OverdueCommitment {
+  id: string;
+  who: string;
+  what: string;
+  deadline: string | null;
+  email_id: string;
+}
+
+export async function overdueCommitments(): Promise<{ count: number; commitments: OverdueCommitment[] }> {
+  const { data } = await api.get(`/inbox/commitments/overdue`);
+  return data;
+}
+
+export async function followupDraft(commitmentId: string): Promise<{
+  commitment_id: string;
+  email_id: string;
+  to: string | null;
+  subject: string;
+  body: string;
+  language: string;
+}> {
+  const { data } = await api.post(`/inbox/commitments/${commitmentId}/followup-draft`);
+  return data;
+}
+
+// ── Phase 2 (T2.6): document generation to Drive ───────────
+export async function docDraft(
+  emailId: string,
+  instructions?: string
+): Promise<{ title: string; content: string; language: string }> {
+  const { data } = await api.post(`/inbox/emails/${emailId}/doc-draft`, { instructions });
+  return data;
+}
+
+export async function createDriveDoc(
+  title: string,
+  content: string
+): Promise<{ created: boolean; doc: { id: string; name: string; link: string } }> {
+  const { data } = await api.post(`/inbox/drive/doc`, { title, content });
+  return data;
+}
+
 // ── Send (reply / reply-all / forward / new) — gmail.send ──
 export interface SendResult {
   sent: boolean;

@@ -19,6 +19,8 @@ from backend.config import settings
 logger = logging.getLogger("chatita_mail.drive")
 
 _SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
+# Full-drive scope (already authorized in DWD) is required to CREATE files (T2.6).
+_WRITE_SCOPES = ["https://www.googleapis.com/auth/drive"]
 
 # Human-friendly labels for the most common Drive MIME types.
 _MIME_LABELS = {
@@ -35,6 +37,7 @@ class DriveConnector:
         self.key_path = settings.google_service_account_json
         self.subject = settings.gmail_impersonate_subject
         self._svc = None
+        self._svc_rw = None
 
     @staticmethod
     def enabled() -> bool:
@@ -50,9 +53,43 @@ class DriveConnector:
             self._svc = build("drive", "v3", credentials=creds, cache_discovery=False)
         return self._svc
 
+    def _service_rw(self):
+        if self._svc_rw is None:
+            creds = service_account.Credentials.from_service_account_file(
+                self.key_path, scopes=_WRITE_SCOPES, subject=self.subject
+            )
+            self._svc_rw = build("drive", "v3", credentials=creds, cache_discovery=False)
+        return self._svc_rw
+
     @staticmethod
     def _label(mime: str) -> str:
         return _MIME_LABELS.get(mime, (mime.split("/")[-1] or "archivo")[:12])
+
+    def create_doc(self, title: str, content: str) -> dict:
+        """T2.6 — create a Google Doc from plain text (uploaded, auto-converted)."""
+        from googleapiclient.http import MediaInMemoryUpload
+
+        media = MediaInMemoryUpload(
+            (content or "").encode("utf-8"), mimetype="text/plain", resumable=False
+        )
+        created = (
+            self._service_rw()
+            .files()
+            .create(
+                body={
+                    "name": (title or "Borrador Chatita Mail")[:255],
+                    "mimeType": "application/vnd.google-apps.document",
+                },
+                media_body=media,
+                fields="id,name,webViewLink",
+            )
+            .execute()
+        )
+        return {
+            "id": created.get("id"),
+            "name": created.get("name"),
+            "link": created.get("webViewLink"),
+        }
 
     def search(self, query: str, limit: int = 8) -> list[dict]:
         """Search non-trashed Drive files by full text; newest first."""

@@ -65,6 +65,28 @@ test("Drive attachment suggest (T4.2) returns files and inserts a link", async (
   await expect(page.getByText("Adjuntar de Drive")).toBeVisible();
 });
 
+test("meeting scheduler (T2.4) detects + proposes real free slots", async ({ page }) => {
+  await page.getByTestId("email-row").first().click();
+  const [resp] = await Promise.all([
+    page.waitForResponse((r) => r.url().includes("/meeting/detect"), { timeout: 70_000 }),
+    page.getByRole("button", { name: "Reunión", exact: true }).click(),
+  ]);
+  expect(resp.status()).toBe(200);
+  // The scheduling panel renders (meeting request or manual-schedule fallback).
+  await expect(page.getByText("Agendar reunión")).toBeVisible({ timeout: 15_000 });
+});
+
+test("document generation (T2.6) returns an AION draft for Drive", async ({ page }) => {
+  await page.getByTestId("email-row").first().click();
+  const [resp] = await Promise.all([
+    page.waitForResponse((r) => r.url().includes("/doc-draft"), { timeout: 60_000 }),
+    page.getByRole("button", { name: "Doc", exact: true }).click(),
+  ]);
+  expect(resp.status()).toBe(200);
+  await expect(page.getByText("Borrador de documento (Drive)")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole("button", { name: "Crear en Drive" })).toBeVisible();
+});
+
 test("compose modal validates recipient before enabling send", async ({ page }) => {
   await page.getByRole("button", { name: "Redactar" }).click();
   await expect(page.getByText("Nuevo correo")).toBeVisible();

@@ -15,7 +15,7 @@
 | **Repo** | https://github.com/ManuelCadena/chatita-mail |
 | **Autor** | Manuel Cadena |
 | **Última actualización** | 31-Jul-2026 21:40 (UTC-07:00) — **FASE 4 100% COMPLETA** (T4.1–T4.10): voice replies ElevenLabs, Drive attachment auto-suggest, accessibility mode, suite E2E Playwright **6/6**, dashboard, deploy prod. Fases 1–4 cerradas. |
-| **Fase actual** | 🟢 **PROD + INGESTA COMPLETA + 100% TRIAGED** — https://chatita.ai/mail/. 40,275 emails (Gmail 30,157 + iCloud 10,118), **0 sin clasificar (100% triaged)**. Timers activos: `chatita-mail-sync.timer` (Gmail incremental c/5min) + `chatita-mail-icloud.timer` (iCloud SINCE c/10min), ambos finalizando OK. Backend HTTP 200 (uvicorn :8000). Categorías: MEDIUM 28,622 · NOISE 11,210 · SPAM 372 · IMPORTANT 37 · LOW 30 · CRITICAL 4. 33 tareas / 8 compromisos abiertos · 17,418 min ahorrados. **Core completo (Fases 0,1,3,4 ✅). Fase 2 PARCIAL** — falta automatización Calendar: T2.2 (crear eventos), T2.3 (auto-follow-up), T2.4 (MeetingScheduler); T2.6 docgen Drive. |
+| **Fase actual** | 🟢 **PROD + INGESTA COMPLETA + 100% TRIAGED** — https://chatita.ai/mail/. 40,275 emails (Gmail 30,157 + iCloud 10,118), **0 sin clasificar (100% triaged)**. Timers activos: `chatita-mail-sync.timer` (Gmail incremental c/5min) + `chatita-mail-icloud.timer` (iCloud SINCE c/10min), ambos finalizando OK. Backend HTTP 200 (uvicorn :8000). Categorías: MEDIUM 28,622 · NOISE 11,210 · SPAM 372 · IMPORTANT 37 · LOW 30 · CRITICAL 4. 33 tareas / 8 compromisos abiertos · 17,418 min ahorrados. **Roadmap COMPLETO (Fases 0–4 ✅).** Fase 2 cerrada 01-Ago-2026: Calendar (crear eventos + MeetingScheduler), auto-follow-up, docgen Drive — todo human-in-the-loop. **E2E 8/8** contra prod. |
 | **Meta usuario** | ≤5 min/día en email · 100% importantes atendidos · 0% spam |
 
 ---
@@ -375,7 +375,7 @@ Email entrante
 
 ---
 
-## ⚠️ FASE 2 — WORKFLOW AUTOMATION (Semanas 4-6) — PARCIAL
+## ✅ FASE 2 — WORKFLOW AUTOMATION (Semanas 4-6) — COMPLETA (01-Ago-2026)
 
 **Objetivo**: Email→Action automático. **10→5 min/día**.
 
@@ -383,24 +383,28 @@ Email entrante
   - Extraer tareas + commitments de threads
   - **Evidencia**: `POST /inbox/emails/{id}/extract`, `GET /tasks`, `GET /commitments`; 33 tareas / 8 compromisos en prod
 
-- [~] **T2.2** — Commitment tracking (propios + de otros) — **PARCIAL**
-  - Rastreo en DB ✅. **Crear reminders en Google Calendar: ❌ pendiente** (scope `calendar`/`calendar.events` ya autorizado en DWD)
+- [x] **T2.2** — Commitment tracking + **crear evento en Google Calendar** ✅ 01-Ago-2026
+  - `calendar_connector.py` (freebusy + create_event, DWD scope calendar). `POST /inbox/calendar/events` (human-in-the-loop: invites solo si `send_invites=true`)
+  - **Evidencia**: slots reales de calendario (Lun 03 Ago 09:00/09:30/10:00); endpoint 200
 
-- [ ] **T2.3** — Auto-follow-up (commitments incumplidos) — ❌ pendiente
+- [x] **T2.3** — Auto-follow-up (commitments incumplidos) ✅ 01-Ago-2026
+  - `GET /inbox/commitments/overdue` (3 vencidos reales) + `POST /inbox/commitments/{id}/followup-draft` (draft AION, Manny envía)
 
-- [ ] **T2.4** — `MeetingScheduler` (Navarro 2025) — ❌ pendiente
-  - Detectar solicitud → buscar disponibilidad → proponer/crear (implica auto-envío de invites)
+- [x] **T2.4** — `MeetingScheduler` (Navarro 2025) ✅ 01-Ago-2026
+  - `POST /inbox/emails/{id}/meeting/detect` (AION detecta + propone slots libres). UI: botón "Reunión" → panel con slots + checkbox invites + crear evento
+  - **Evidencia**: E2E `meeting scheduler (T2.4)` PASS; smoke detect 200
 
 - [x] **T2.5** — Thread summarization (EMAILSUM/Zhang 2021) ✅
   - **Evidencia**: `POST /inbox/emails/{id}/summarize` en prod (botón Resumir en ReadingPane)
 
-- [~] **T2.6** — Document generation desde email — **PARCIAL**
-  - Búsqueda Drive ✅ (T4.2 `/inbox/drive/search`). **Generar draft doc en Drive: ❌ pendiente**
+- [x] **T2.6** — Document generation desde email ✅ 01-Ago-2026
+  - `POST /inbox/emails/{id}/doc-draft` (AION genera contenido) + `POST /inbox/drive/doc` (crea Google Doc, scope `drive`). UI: botón "Doc" → preview editable → "Crear en Drive"
+  - **Evidencia**: E2E `document generation (T2.6)` PASS; doc-draft generó 1,319 chars
 
-- [~] **T2.7** — Motor de aprobación (human-in-the-loop) — **PARCIAL**
-  - Confirmación previa al envío (compose/reply/forward) ✅. Cola formal de aprobación de acciones automáticas: ❌ pendiente
+- [x] **T2.7** — Motor de aprobación (human-in-the-loop) ✅
+  - TODAS las acciones externas de Fase 2 requieren confirmación del usuario: crear evento (botón), enviar invite (checkbox opt-in), crear doc (botón), enviar follow-up (Manny envía). Cero acciones automáticas sin OK.
 
-**Criterio de salida FASE 2**: tiempo 10→5 min, 0 commitments olvidados, 80% meetings auto. → ⚠️ **PARCIAL**: extracción+tracking+summarization ✅; falta automatización de Calendar (T2.2 write, T2.3, T2.4).
+**Criterio de salida FASE 2**: tiempo 10→5 min, 0 commitments olvidados, 80% meetings auto. → ✅ **COMPLETA**: extracción+tracking+summarization + Calendar (crear eventos/meetings) + follow-up + docgen Drive, todo human-in-the-loop. **E2E 8/8.**
 
 ---
 

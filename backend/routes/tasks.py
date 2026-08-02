@@ -266,6 +266,239 @@ async def drive_search(
         raise HTTPException(status_code=502, detail=f"Drive error: {str(exc)[:200]}") from exc
 
 
+# ── Phase 2 (T2.2 / T2.4): Google Calendar ──────────────────
+class CalendarEventIn(BaseModel):
+    summary: str
+    start: str  # ISO-8601
+    end: str | None = None
+    duration_min: int = 60
+    description: str | None = None
+    attendees: list[str] = []
+    send_invites: bool = False  # human-in-the-loop: only email invites when True
+
+
+@router.get("/inbox/calendar/slots")
+async def calendar_slots(
+    duration: int = Query(60, ge=15, le=480),
+    days: int = Query(10, ge=1, le=30),
+    max_slots: int = Query(5, ge=1, le=10),
+) -> dict:
+    """T2.4 — propose free meeting slots (read-only) from the primary calendar."""
+    import asyncio
+
+    from backend.services.email.calendar_connector import CalendarConnector
+
+    conn = CalendarConnector()
+    if not conn.enabled():
+        return {"enabled": False, "slots": []}
+    try:
+        slots = await asyncio.to_thread(conn.find_free_slots, duration, days, max_slots)
+        return {"enabled": True, "slots": slots}
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Calendar error: {str(exc)[:200]}") from exc
+
+
+@router.post("/inbox/calendar/events")
+async def calendar_create_event(payload: CalendarEventIn) -> dict:
+    """T2.2/T2.4 — create a calendar event (called only after user confirmation)."""
+    import asyncio
+
+    from backend.services.email.calendar_connector import CalendarConnector
+
+    conn = CalendarConnector()
+    if not conn.enabled():
+        raise HTTPException(status_code=503, detail="Calendar not configured")
+    try:
+        ev = await asyncio.to_thread(
+            conn.create_event,
+            summary=payload.summary,
+            start_iso=payload.start,
+            end_iso=payload.end,
+            duration_min=payload.duration_min,
+            description=payload.description,
+            attendees=payload.attendees,
+            send_updates="all" if payload.send_invites else "none",
+        )
+        return {"created": True, "event": ev}
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Calendar error: {str(exc)[:200]}") from exc
+
+
+@router.post("/inbox/emails/{email_id}/meeting/detect")
+async def detect_meeting(
+    email_id: str, session: AsyncSession = Depends(get_session)
+) -> dict:
+    """T2.4 — detect if an email requests a meeting; if so, propose free slots."""
+    import asyncio
+
+    from backend.services.email.calendar_connector import CalendarConnector
+
+    email = await session.get(Email, email_id)
+    if not email:
+        raise HTTPException(status_code=404, detail="Email not found")
+
+    body = (email.body_text or email.snippet or "")[:3000]
+    prompt = (
+        "Analyze if this email is REQUESTING a meeting/call. Return ONLY minified JSON: "
+        '{"is_meeting_request":true|false,"topic":"...","duration_minutes":30|60|...,'
+        '"attendees":["email"],"urgency":"low|medium|high"}. '
+        "If it is not a meeting request, set is_meeting_request=false.\n\n"
+        f"FROM: {email.from_name or ''} <{email.from_address}>\n"
+        f"SUBJECT: {email.subject or ''}\nBODY:\n{body}"
+    )
+    detected: dict = {"is_meeting_request": False}
+    try:
+        resp = await _extractor.aion.orchestrate(prompt, task_type="simple", priority="P2")
+        text = (resp or {}).get("text") or ""
+        parsed = _extractor._parse_json(text) if text else None
+        if parsed:
+            detected = parsed
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"AION error: {str(exc)[:160]}") from exc
+
+    slots: list[dict] = []
+    if detected.get("is_meeting_request"):
+        conn = CalendarConnector()
+        if conn.enabled():
+            dur = int(detected.get("duration_minutes") or 60)
+            try:
+                slots = await asyncio.to_thread(conn.find_free_slots, dur, 10, 5)
+            except Exception:  # noqa: BLE001
+                slots = []
+    # Default attendee = the sender, so the UI can pre-fill the invite.
+    attendees = detected.get("attendees") or [email.from_address]
+    return {
+        "is_meeting_request": bool(detected.get("is_meeting_request")),
+        "topic": detected.get("topic") or (email.subject or "Reunión"),
+        "duration_minutes": int(detected.get("duration_minutes") or 60),
+        "attendees": [a for a in attendees if a],
+        "urgency": detected.get("urgency"),
+        "slots": slots,
+    }
+
+
+# ── Phase 2 (T2.3): overdue commitments + follow-up drafts ───
+@router.get("/inbox/commitments/overdue")
+async def overdue_commitments(
+    limit: int = Query(50, le=200), session: AsyncSession = Depends(get_session)
+) -> dict:
+    """T2.3 — commitments past their deadline still pending (need a follow-up)."""
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc)
+    stmt = (
+        select(Commitment)
+        .where(Commitment.status == "pending")
+        .where(Commitment.deadline.isnot(None))
+        .where(Commitment.deadline < now)
+        .order_by(Commitment.deadline.asc())
+        .limit(limit)
+    )
+    rows = (await session.scalars(stmt)).all()
+    return {
+        "count": len(rows),
+        "commitments": [
+            {
+                "id": c.id,
+                "who": c.who,
+                "what": c.what,
+                "deadline": c.deadline.isoformat() if c.deadline else None,
+                "email_id": c.email_id,
+            }
+            for c in rows
+        ],
+    }
+
+
+@router.post("/inbox/commitments/{commitment_id}/followup-draft")
+async def followup_draft(
+    commitment_id: str, session: AsyncSession = Depends(get_session)
+) -> dict:
+    """T2.3 — generate a polite follow-up draft for an overdue commitment (user sends)."""
+    c = await session.get(Commitment, commitment_id)
+    if not c:
+        raise HTTPException(status_code=404, detail="Commitment not found")
+    email = await session.get(Email, c.email_id)
+    lang = _email_lang(email) if email else "es"
+    subject = f"Re: {email.subject}" if email and email.subject else "Seguimiento"
+    prompt = (
+        f"Write a short, polite follow-up email (in {'Spanish' if lang=='es' else 'English'}) "
+        f"about this pending commitment: \"{c.what}\" (responsible: {c.who}, "
+        f"deadline was {c.deadline.date().isoformat() if c.deadline else 'unspecified'}). "
+        "Be courteous and concise (3-4 sentences). Return ONLY the email body text."
+    )
+    try:
+        resp = await _extractor.aion.orchestrate(prompt, task_type="medium", priority="P2")
+        text = (resp or {}).get("text") or ""
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"AION error: {str(exc)[:160]}") from exc
+    if not text.strip():
+        raise HTTPException(status_code=502, detail="AION returned empty draft")
+    return {
+        "commitment_id": c.id,
+        "email_id": c.email_id,
+        "to": email.from_address if email else None,
+        "subject": subject,
+        "body": text.strip(),
+        "language": lang,
+    }
+
+
+# ── Phase 2 (T2.6): generate a Drive doc draft from an email ─
+class DocDraftIn(BaseModel):
+    instructions: str | None = None
+
+
+class DocCreateIn(BaseModel):
+    title: str
+    content: str
+
+
+@router.post("/inbox/emails/{email_id}/doc-draft")
+async def doc_draft(
+    email_id: str, payload: DocDraftIn, session: AsyncSession = Depends(get_session)
+) -> dict:
+    """T2.6 — AION generates a document draft from the email (no side effect yet)."""
+    email = await session.get(Email, email_id)
+    if not email:
+        raise HTTPException(status_code=404, detail="Email not found")
+    lang = _email_lang(email)
+    body = (email.body_text or email.snippet or "")[:3000]
+    extra = f"\nExtra instructions: {payload.instructions}" if payload.instructions else ""
+    prompt = (
+        f"Draft a well-structured document (in {'Spanish' if lang=='es' else 'English'}) "
+        f"based on this email. Use clear headings and bullet points where useful.{extra}\n\n"
+        f"SUBJECT: {email.subject or ''}\nFROM: {email.from_address}\nBODY:\n{body}\n\n"
+        "Return ONLY the document text (no preamble)."
+    )
+    try:
+        resp = await _extractor.aion.orchestrate(prompt, task_type="complex", priority="P2")
+        text = (resp or {}).get("text") or ""
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"AION error: {str(exc)[:160]}") from exc
+    if not text.strip():
+        raise HTTPException(status_code=502, detail="AION returned empty draft")
+    title = (email.subject or "Documento").strip()[:200]
+    return {"title": title, "content": text.strip(), "language": lang}
+
+
+@router.post("/inbox/drive/doc")
+async def create_drive_doc(payload: DocCreateIn) -> dict:
+    """T2.6 — create the Google Doc in Drive (called after user confirms the draft)."""
+    import asyncio
+
+    from backend.services.email.drive_connector import DriveConnector
+
+    conn = DriveConnector()
+    if not conn.enabled():
+        raise HTTPException(status_code=503, detail="Drive not configured")
+    try:
+        doc = await asyncio.to_thread(conn.create_doc, payload.title, payload.content)
+        return {"created": True, "doc": doc}
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Drive error: {str(exc)[:200]}") from exc
+
+
 # ── Phase 4 (T4.1): Voice replies via ElevenLabs TTS ────────
 class TTSIn(BaseModel):
     text: str
